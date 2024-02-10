@@ -49,7 +49,7 @@ instead."
   "Whether the article number (faster!) or the header should be used.
 
 You must set this to nil if you don't read Gmane groups directly
-from news.gmane.org, e.g. when using local newsserver such as
+from news.gmane.io, e.g. when using local newsserver such as
 leafnode."
   :type 'boolean)
 
@@ -64,7 +64,7 @@ The function must accept the arguments `host' and `report'."
 		 spam-report-url-ping-mm-url)
 	  (const :tag "Store request URLs in `spam-report-requests-file'"
 		 spam-report-url-to-file)
-	  (function :tag "User defined function" nil)))
+	  (function :tag "User defined function")))
 
 (defcustom spam-report-requests-file
   (nnheader-concat gnus-directory "spam/" "spam-report-requests.url")
@@ -149,6 +149,8 @@ submitted at once.  Internal variable.")
   (when (and gnus-newsgroup-name
 	     (or (null spam-report-gmane-regex)
 		 (string-match spam-report-gmane-regex gnus-newsgroup-name)))
+    ;; FIXME: These addresses are down.  There is also no
+    ;;        unspam.gmane.io or spam.gmane.io.
     (let ((rpt-host (if unspam "unspam.gmane.org" "spam.gmane.org")))
       (gnus-message 6 "Reporting article %d to %s..." article rpt-host)
       (cond
@@ -291,7 +293,7 @@ symbol `ask', query before flushing the queue file."
     (goto-char (point-min))
     (while (and (not (eobp))
 		(re-search-forward
-		 "http://\\([^/]+\\)\\(/.*\\) *$" (point-at-eol) t))
+                 "http://\\([^/]+\\)\\(/.*\\) *$" (line-end-position) t))
       (let ((spam-report-gmane-wait
 	     (zerop (% (line-number-at-pos) spam-report-gmane-max-requests))))
 	(gnus-message 6 "Reporting %s%s..."

@@ -4,7 +4,7 @@
 
 ;; Author: Eric Schulte
 ;; Keywords: literate programming, reproducible research, js
-;; Homepage: https://orgmode.org
+;; URL: https://orgmode.org
 
 ;; This file is part of GNU Emacs.
 
@@ -38,6 +38,10 @@
 ;;   configuration instructions
 
 ;;; Code:
+
+(require 'org-macs)
+(org-assert-version)
+
 (require 'ob)
 
 (declare-function run-mozilla "ext:moz" (arg))
@@ -65,7 +69,10 @@
   :safe #'stringp)
 
 (defvar org-babel-js-function-wrapper
-  "require('process').stdout.write(require('util').inspect(function(){%s}()));"
+  ;; Note that newline after %s - it makes sure that closing
+  ;; parenthesis are not shadowed if the last line of the body is a
+  ;; line comment.
+  "require('process').stdout.write(require('util').inspect(function(){%s\n}()));"
   "Javascript code to print value of body.")
 
 (defun org-babel-execute:js (body params)

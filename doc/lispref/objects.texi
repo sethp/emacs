@@ -82,7 +82,9 @@ it does not make sense to enter objects of these types as constants in
 a Lisp program.  These objects are printed in @dfn{hash notation},
 which consists of the characters @samp{#<}, a descriptive string
 (typically the type name followed by the name of the object), and a
-closing @samp{>}.  For example:
+closing @samp{>}.  (This is called ``hash notation'' because it begins
+with the @samp{#} character, known as ``hash'' or ``number sign'').
+For example:
 
 @example
 (current-buffer)
@@ -93,6 +95,12 @@ closing @samp{>}.  For example:
 Hash notation cannot be read at all, so the Lisp reader signals the
 error @code{invalid-read-syntax} whenever it encounters @samp{#<}.
 @kindex invalid-read-syntax
+
+  We describe the read syntax and the printed representation of each
+Lisp data type where we describe that data type, in the following
+sections of this chapter.  For example, see @ref{String Type}, and its
+subsections for the read syntax and printed representation of strings;
+see @ref{Vector Type} for the same information about vectors; etc.
 
   In other languages, an expression is text; it has no other form.  In
 Lisp, an expression is primarily a Lisp object and only secondarily the
@@ -319,6 +327,8 @@ number whose value is 1500.  They are all equivalent.
   A @dfn{character} in Emacs Lisp is nothing more than an integer.  In
 other words, characters are represented by their character codes.  For
 example, the character @kbd{A} is represented as the @w{integer 65}.
+That is also their usual printed representation; see @ref{Basic Char
+Syntax}.
 
   Individual characters are used occasionally in programs, but it is
 more common to work with @emph{strings}, which are sequences composed
@@ -466,19 +476,20 @@ You can specify characters by their Unicode values.
 @code{?\u@var{xxxx}} and @code{?\U@var{xxxxxxxx}} represent code
 points @var{xxxx} and @var{xxxxxxxx}, respectively, where each @var{x}
 is a single hexadecimal digit.  For example, @code{?\N@{U+E0@}},
-@code{?\u00e0} and @code{?\U000000E0} are all equivalent to @code{?à}
-and to @samp{?\N@{LATIN SMALL LETTER A WITH GRAVE@}}.  The Unicode
-Standard defines code points only up to @samp{U+@var{10ffff}}, so if
-you specify a code point higher than that, Emacs signals an error.
+@code{?\u00e0} and @code{?\U000000E0} are all equivalent to
+@code{?@`a} and to @samp{?\N@{LATIN SMALL LETTER A WITH GRAVE@}}.  The
+Unicode Standard defines code points only up to @samp{U+@var{10ffff}},
+so if you specify a code point higher than that, Emacs signals an
+error.
 
 @item
 You can specify characters by their hexadecimal character
 codes.  A hexadecimal escape sequence consists of a backslash,
 @samp{x}, and the hexadecimal character code.  Thus, @samp{?\x41} is
 the character @kbd{A}, @samp{?\x1} is the character @kbd{C-a}, and
-@code{?\xe0} is the character @kbd{à} (@kbd{a} with grave accent).
-You can use any number of hex digits, so you can represent any
-character code in this way.
+@code{?\xe0} is the character @kbd{@`a} (@kbd{a} with grave accent).
+You can use one or more hex digits after @samp{x}, so you can
+represent any character code in this way.
 
 @item
 @cindex octal character code
@@ -1007,13 +1018,6 @@ It looks like this:
 @end example
 @end ifnottex
 
-  As a somewhat peculiar side effect of @code{(a b . c)} and
-@code{(a . (b . c))} being equivalent, for consistency this means
-that if you replace @code{b} here with the empty sequence, then it
-follows that @code{(a . c)} and @code{(a . ( . c))} are equivalent,
-too.  This also means that @code{( .  c)} is equivalent to @code{c},
-but this is seldom used.
-
 @node Association List Type
 @subsubsection Association List Type
 
@@ -1110,6 +1114,22 @@ character.  Likewise, you can include a backslash by preceding it with
 another backslash, like this: @code{"this \\ is a single embedded
 backslash"}.
 
+  Since a string is an array of characters, you can specify the string
+characters using the read syntax of characters, but without the
+leading question mark.  This is useful for including in string
+constants characters that don't stand for themselves.  Thus, control
+characters can be specified as escape sequences that start with a
+backslash; for example, @code{"foo\r"} yields @samp{foo} followed by
+the carriage return character.  @xref{Basic Char Syntax}, for escape
+sequences of other control characters.  Similarly, you can use the
+special read syntax for control characters (@pxref{Ctl-Char Syntax}),
+as in @code{"foo\^Ibar"}, which produces a tab character embedded
+within a string.  You can also use the escape sequences for non-ASCII
+characters described in @ref{General Escape Syntax}, as in
+@w{@code{"\N@{LATIN SMALL LETTER A WITH GRAVE@}"}} and @code{"\u00e0"}
+(however, see a caveat with non-ASCII characters in @ref{Non-ASCII in
+Strings}).
+
 @cindex newline in strings
   The newline character is not special in the read syntax for strings;
 if you write a new line between the double-quotes, it becomes a
@@ -1160,13 +1180,14 @@ character), Emacs automatically assumes that it is multibyte.
 
   You can also use hexadecimal escape sequences (@samp{\x@var{n}}) and
 octal escape sequences (@samp{\@var{n}}) in string constants.
-@strong{But beware:} If a string constant contains hexadecimal or
-octal escape sequences, and these escape sequences all specify unibyte
-characters (i.e., less than 256), and there are no other literal
-non-@acronym{ASCII} characters or Unicode-style escape sequences in
-the string, then Emacs automatically assumes that it is a unibyte
-string.  That is to say, it assumes that all non-@acronym{ASCII}
-characters occurring in the string are 8-bit raw bytes.
+@strong{But beware:} If a string constant contains octal escape
+sequences or one- or two-digit hexadecimal escape sequences, and these
+escape sequences all specify unibyte characters (i.e., codepoints less
+than 256), and there are no other literal non-@acronym{ASCII}
+characters or Unicode-style escape sequences in the string, then Emacs
+automatically assumes that it is a unibyte string.  That is to say, it
+assumes that all non-@acronym{ASCII} characters occurring in the
+string are 8-bit raw bytes.
 
   In hexadecimal and octal escape sequences, the escaped character
 code may contain a variable number of digits, so the first subsequent
@@ -1186,8 +1207,9 @@ but it does terminate any preceding hex escape.
 as in character literals (but do not use the question mark that begins a
 character constant).  For example, you can write a string containing the
 nonprinting characters tab and @kbd{C-a}, with commas and spaces between
-them, like this: @code{"\t, \C-a"}.  @xref{Character Type}, for a
-description of the read syntax for characters.
+them, like this: @code{"\t, \C-a"}.  @xref{Character Type}, and its
+subsections for a description of the various kinds of read syntax for
+characters.
 
   However, not all of the characters you can write with backslash
 escape-sequences are valid in strings.  The only control characters that
@@ -1541,6 +1563,7 @@ editing.
 * Keymap Type::         What function a keystroke invokes.
 * Overlay Type::        How an overlay is represented.
 * Font Type::           Fonts for displaying text.
+* Xwidget Type::        Embeddable widgets.
 @end menu
 
 @node Buffer Type
@@ -1866,6 +1889,20 @@ syntax looks like @samp{#<font-object>}, @samp{#<font-spec>}, and
 @samp{#<font-entity>} respectively.  @xref{Low-Level Font}, for a
 description of these Lisp objects.
 
+@node Xwidget Type
+@subsection Xwidget Type
+@cindex xwidget type
+@cindex xwidget-view type
+
+  An @dfn{xwidget} is a special display element, such as a web
+browser, that can be embedded inside a buffer.  Each window that
+displays an xwidget will also have an @dfn{xwidget view}, which on
+X-Windows corresponds to a single X window used to display the widget.
+
+Neither of these objects are readable; their print syntaxes look like
+@samp{#<xwidget>} and @samp{#<xwidget-view>}, respectively.
+@xref{Xwidgets}, for a more detailed description of xwidgets.
+
 @node Circular Objects
 @section Read Syntax for Circular Objects
 @cindex circular structure, read syntax
@@ -2006,6 +2043,9 @@ with references to further information.
 
 @item byte-code-function-p
 @xref{Byte-Code Type, byte-code-function-p}.
+
+@item compiled-function-p
+@xref{Byte-Code Type, compiled-function-p}.
 
 @item case-table-p
 @xref{Case Tables, case-table-p}.

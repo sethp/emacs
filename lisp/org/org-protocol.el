@@ -34,7 +34,10 @@
 ;; `org-protocol-protocol-alist' and `org-protocol-protocol-alist-default'.
 ;;
 ;; Any application that supports calling external programs with an URL
-;; as argument may be used with this functionality.
+;; as argument could use this functionality.  For example, you can
+;; configure bookmarks in your web browser to send a link to the
+;; current page to Org and create a note from it using `org-capture'.
+;; See Info node `(org) Protocols' for more information.
 ;;
 ;;
 ;; Usage:
@@ -42,16 +45,15 @@
 ;;
 ;;   1.) Add this to your init file (.emacs probably):
 ;;
-;;       (add-to-list 'load-path "/path/to/org-protocol/")
 ;;       (require 'org-protocol)
 ;;
-;;   3.) Ensure emacs-server is up and running.
-;;   4.) Try this from the command line (adjust the URL as needed):
+;;   2.) Ensure emacs-server is up and running.
+;;   3.) Try this from the command line (adjust the URL as needed):
 ;;
 ;;       $ emacsclient \
 ;;         "org-protocol://store-link?url=http:%2F%2Flocalhost%2Findex.html&title=The%20title"
 ;;
-;;   5.) Optionally add custom sub-protocols and handlers:
+;;   4.) Optionally, add custom sub-protocols and handlers:
 ;;
 ;;       (setq org-protocol-protocol-alist
 ;;             '(("my-protocol"
@@ -65,10 +67,11 @@
 ;; If it works, you can now setup other applications for using this feature.
 ;;
 ;;
-;; As of March 2009 Firefox users follow the steps documented on
-;; http://kb.mozillazine.org/Register_protocol, Opera setup is described here:
-;; http://www.opera.com/support/kb/view/535/
+;; Firefox users follow the steps documented on
+;; https://kb.mozillazine.org/Register_protocol, Opera setup is
+;; described here: http://www.opera.com/support/kb/view/535/
 ;;
+;; See also: https://orgmode.org/worg/org-contrib/org-protocol.html
 ;;
 ;; Documentation
 ;; -------------
@@ -124,17 +127,16 @@
 ;; Note that using double slashes is optional from org-protocol.el's point of
 ;; view because emacsclient squashes the slashes to one.
 ;;
-;;
-;; provides: 'org-protocol
-;;
 ;;; Code:
+
+(require 'org-macs)
+(org-assert-version)
 
 (require 'org)
 (require 'ol)
 
 (declare-function org-publish-get-project-from-filename "ox-publish"
 		  (filename &optional up))
-(declare-function server-edit "server" (&optional arg))
 
 (defvar org-capture-link-is-already-stored)
 (defvar org-capture-templates)
@@ -174,7 +176,6 @@ The filenames passed on the command line are passed to the emacs-server in
 reverse order.  Set to t (default) to re-reverse the list, i.e. use the
 sequence on the command line.  If nil, the sequence of the filenames is
 unchanged."
-  :group 'org-protocol
   :type 'boolean)
 
 (defcustom org-protocol-project-alist nil
@@ -233,7 +234,6 @@ Example:
 Consider using the interactive functions `org-protocol-create'
 and `org-protocol-create-for-org' to help you filling this
 variable with valid contents."
-  :group 'org-protocol
   :type 'alist)
 
 (defcustom org-protocol-protocol-alist nil
@@ -284,20 +284,17 @@ Here is an example:
         (\"your-protocol\"
          :protocol \"your-protocol\"
          :function your-protocol-handler-function)))"
-  :group 'org-protocol
   :type '(alist))
 
 (defcustom org-protocol-default-template-key nil
   "The default template key to use.
 This is usually a single character string but can also be a
 string with two characters."
-  :group 'org-protocol
   :type '(choice (const nil) (string)))
 
 (defcustom org-protocol-data-separator "/+\\|\\?"
   "The default data separator to use.
 This should be a single regexp string."
-  :group 'org-protocol
   :version "24.4"
   :package-version '(Org . "8.0")
   :type 'regexp)
@@ -309,7 +306,8 @@ This should be a single regexp string."
 Emacsclient compresses double and triple slashes."
   (when (string-match "^\\([a-z]+\\):/" uri)
     (let* ((splitparts (split-string uri "/+")))
-      (setq uri (concat (car splitparts) "//" (mapconcat 'identity (cdr splitparts) "/")))))
+      (setq uri (concat (car splitparts) "//"
+                        (mapconcat #'identity (cdr splitparts) "/")))))
   uri)
 
 (defun org-protocol-split-data (data &optional unhexify separator)
@@ -371,6 +369,7 @@ returned list."
 	  ret)
       l)))
 
+;; `flatten-tree' was added in Emacs 27.1.
 (defalias 'org-protocol-flatten
   (if (fboundp 'flatten-tree) 'flatten-tree
     (lambda (list)
@@ -549,10 +548,10 @@ Now template ?b will be used."
   "Convert QUERY key=value pairs in the URL to a property list."
   (when query
     (let ((plus-decoded (replace-regexp-in-string "\\+" " " query t t)))
-      (apply 'append (mapcar (lambda (x)
-			       (let ((c (split-string x "=")))
-				 (list (intern (concat ":" (car c))) (cadr c))))
-			     (split-string plus-decoded "&"))))))
+      (cl-mapcan (lambda (x)
+		   (let ((c (split-string x "=")))
+		     (list (intern (concat ":" (car c))) (cadr c))))
+		 (split-string plus-decoded "&")))))
 
 (defun org-protocol-open-source (fname)
   "Process an org-protocol://open-source?url= style URL with FNAME.
@@ -641,7 +640,7 @@ Old-style links such as \"protocol://sub-protocol://param1/param2\" are
 also recognized.
 
 If a matching protocol is found, the protocol is stripped from
-fname and the result is passed to the protocol function as the
+FNAME and the result is passed to the protocol function as the
 first parameter.  The second parameter will be non-nil if FNAME
 uses key=val&key2=val2-type arguments, or nil if FNAME uses
 val/val2-type arguments.  If the function returns nil, the
@@ -671,7 +670,8 @@ CLIENT is ignored."
 		       (new-style (not (= ?: (aref (match-string 1 fname) 0)))))
                   (when (plist-get (cdr prolist) :kill-client)
 		    (message "Greedy org-protocol handler.  Killing client.")
-		    (server-edit))
+		    ;; If not fboundp, there's no client to kill.
+		    (if (fboundp 'server-edit) (server-edit)))
                   (when (fboundp func)
                     (unless greedy
                       (throw 'fname
@@ -687,12 +687,12 @@ to deal with new-style links.")
                     (throw 'fname t))))))))
       fname)))
 
-(defadvice server-visit-files (before org-protocol-detect-protocol-server activate)
-  "Advice server-visit-flist to call `org-protocol-modify-filename-for-protocol'."
+(advice-add 'server-visit-files :around #'org--protocol-detect-protocol-server)
+(defun org--protocol-detect-protocol-server (orig-fun files client &rest args)
+  "Advice server-visit-flist to call `org-protocol-check-filename-for-protocol'."
   (let ((flist (if org-protocol-reverse-list-of-files
-                   (reverse  (ad-get-arg 0))
-                 (ad-get-arg 0)))
-        (client (ad-get-arg 1)))
+                   (reverse files)
+                 files)))
     (catch 'greedy
       (dolist (var flist)
 	;; `\' to `/' on windows.  FIXME: could this be done any better?
@@ -701,11 +701,16 @@ to deal with new-style links.")
 		       fname (member var flist)  client))
           (if (eq fname t) ;; greedy? We need the t return value.
               (progn
-                (ad-set-arg 0 nil)
+                ;; FIXME: Doesn't this just ignore all the files before
+                ;; this one (the remaining ones have been passed to
+                ;; `org-protocol-check-filename-for-protocol' but not
+                ;; the ones before).
+                (setq files nil)
                 (throw 'greedy t))
             (if (stringp fname) ;; probably filename
                 (setcar var fname)
-              (ad-set-arg 0 (delq var (ad-get-arg 0))))))))))
+              (setq files (delq var files)))))))
+    (apply orig-fun files client args)))
 
 ;;; Org specific functions:
 

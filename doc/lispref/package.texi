@@ -152,9 +152,9 @@ the various headers, as illustrated by the following example:
 
 @example
 @group
-;;; superfrobnicator.el --- Frobnicate and bifurcate flanges
+;;; superfrobnicator.el --- Frobnicate and bifurcate flanges  -*- lexical-binding:t -*-
 
-;; Copyright (C) 2011 Free Software Foundation, Inc.
+;; Copyright (C) 2022 Free Software Foundation, Inc.
 @end group
 
 ;; Author: J. R. Hacker <jrh@@example.com>
@@ -283,6 +283,15 @@ variable @code{load-file-name} (@pxref{Loading}).  Here is an example:
 (defun superfrobnicator-fetch-image (file)
   (expand-file-name file superfrobnicator-base))
 @end smallexample
+
+@cindex @file{.elpaignore} file
+  If your package contains files that you don't wish to distribute to
+users (e.g.@: regression tests), you can add them to an
+@file{.elpaignore} file.  In this file, each line lists a file or a
+wildcard matching files; those files should be ignored when producing
+your package's tarball on ELPA (@pxref{Package Archives}).  (ELPA
+will pass this file to the @command{tar} command via the @option{-X}
+command-line option, when it prepares the package for download.)
 
 @node Package Archives
 @section Creating and Maintaining Package Archives

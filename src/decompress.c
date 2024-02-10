@@ -67,8 +67,9 @@ init_zlib_functions (void)
 #endif	/* WINDOWSNT */
 
 
+#ifdef HAVE_NATIVE_COMP
 
-#define MD5_BLOCKSIZE 32768 /* From md5.c  */
+# define MD5_BLOCKSIZE 32768 /* From md5.c  */
 
 static char acc_buff[2 * MD5_BLOCKSIZE];
 static size_t acc_size;
@@ -106,7 +107,7 @@ md5_gz_stream (FILE *source, void *resblock)
   unsigned char in[MD5_BLOCKSIZE];
   unsigned char out[MD5_BLOCKSIZE];
 
-#ifdef WINDOWSNT
+# ifdef WINDOWSNT
   if (!zlib_initialized)
     zlib_initialized = init_zlib_functions ();
   if (!zlib_initialized)
@@ -114,7 +115,7 @@ md5_gz_stream (FILE *source, void *resblock)
       message1 ("zlib library not found");
       return -1;
     }
-#endif
+# endif
 
   eassert (!acc_size);
 
@@ -150,7 +151,7 @@ md5_gz_stream (FILE *source, void *resblock)
 	return -1;
 
       accumulate_and_process_md5 (out, MD5_BLOCKSIZE - stream.avail_out, &ctx);
-    } while (!stream.avail_out);
+    } while (stream.avail_in && !stream.avail_out);
 
   } while (res != Z_STREAM_END);
 
@@ -164,7 +165,8 @@ md5_gz_stream (FILE *source, void *resblock)
 
   return 0;
 }
-#undef MD5_BLOCKSIZE
+# undef MD5_BLOCKSIZE
+#endif
 
 
 
@@ -239,7 +241,7 @@ This function can be called only in unibyte buffers.  */)
   z_stream stream;
   int inflate_status;
   struct decompress_unwind_data unwind_data;
-  ptrdiff_t count = SPECPDL_INDEX ();
+  specpdl_ref count = SPECPDL_INDEX ();
 
   validate_region (&start, &end);
 

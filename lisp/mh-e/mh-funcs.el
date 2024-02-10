@@ -101,14 +101,14 @@ a non-nil value to suppress the normal prompt when you remove a
 folder. This is useful for folders that are easily regenerated."
   (interactive)
   (if (or (run-hook-with-args-until-success
-           'mh-kill-folder-suppress-prompt-hooks)
+           'mh-kill-folder-suppress-prompt-functions)
           (yes-or-no-p (format "Remove folder %s (and all included messages)? "
                                mh-current-folder)))
       (let ((folder mh-current-folder)
             (window-config mh-previous-window-config))
         (mh-set-folder-modified-p t)    ; lock folder to kill it
         (mh-exec-cmd-daemon "rmf" 'mh-rmf-daemon folder)
-        (when (boundp 'mh-speed-folder-map)
+        (when (and (boundp 'speedbar-buffer) speedbar-buffer)
           (mh-speed-invalidate-map folder))
         (mh-remove-from-sub-folders-cache folder)
         (mh-set-folder-modified-p nil)  ; so kill-buffer doesn't complain
@@ -147,7 +147,7 @@ Display the results only if something went wrong."
                                             "-recurse"
                                           "-norecurse"))
         (goto-char (point-min))
-        (mh-view-mode-enter)
+        (view-mode-enter)
         (setq view-exit-action 'kill-buffer)
         (message "Listing folders...done")))))
 
@@ -366,7 +366,6 @@ Arguments are IGNORED (for `revert-buffer')."
 (provide 'mh-funcs)
 
 ;; Local Variables:
-;; indent-tabs-mode: nil
 ;; sentence-end-double-space: nil
 ;; End:
 

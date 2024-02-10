@@ -1,7 +1,7 @@
 /* Functions for the pure Gtk+-3.
 
-Copyright (C) 1989, 1992-1994, 2005-2006, 2008-2020, 2024 Free Software
-Foundation, Inc.
+Copyright (C) 1989, 1992-1994, 2005-2006, 2008-2020, 2022-2024 Free
+Software Foundation, Inc.
 
 This file is part of GNU Emacs.
 
@@ -36,15 +36,7 @@ along with GNU Emacs.  If not, see <https://www.gnu.org/licenses/>.  */
 #include "fontset.h"
 #include "font.h"
 #include "xsettings.h"
-
-
-#ifdef HAVE_PGTK
-
-//static EmacsTooltip *pgtk_tooltip = nil;
-
-/* Static variables to handle applescript execution.  */
-static Lisp_Object as_script, *as_result;
-static int as_status;
+#include "atimer.h"
 
 static ptrdiff_t image_cache_refcount;
 
@@ -54,7 +46,7 @@ static struct pgtk_display_info *pgtk_display_info_for_name (Lisp_Object);
 
 static const char *pgtk_app_name = "Emacs";
 
-/* scale factor manually set per monitor */
+/* Scale factor manually set per monitor.  */
 static Lisp_Object monitor_scale_factor_alist;
 
 /* ==========================================================================
@@ -70,20 +62,16 @@ pgtk_get_monitor_scale_factor (const char *model)
     return 0.0;
 
   Lisp_Object mdl = build_string (model);
-  Lisp_Object tem = Fassoc(mdl, monitor_scale_factor_alist, Qnil);
+  Lisp_Object tem = Fassoc (mdl, monitor_scale_factor_alist, Qnil);
   if (NILP (tem))
     return 0;
   Lisp_Object cdr = Fcdr (tem);
   if (NILP (cdr))
     return 0;
   if (FIXNUMP (cdr))
-    {
-      return XFIXNUM (cdr);
-    }
+    return XFIXNUM (cdr);
   else if (FLOATP (cdr))
-    {
-      return XFLOAT_DATA (cdr);
-    }
+    return XFLOAT_DATA (cdr);
   else
     error ("unknown type of scale-factor");
 }
@@ -124,20 +112,17 @@ check_pgtk_display_info (Lisp_Object object)
   return dpyinfo;
 }
 
-/* On Wayland,
- * even if without WAYLAND_DISPLAY, --display DISPLAY works, but
- * gdk_display_get_name() always return "wayland-0", which may be
- * different from DISPLAY.
- * If with WAYLAND_DISPLAY, then it always returns WAYLAND_DISPLAY.
- * So pgtk emacs is confused and enter multi display environment.
- * To workaround this situation, treat all the wayland-* as the same
- * display.
- */
+/* On Wayland, even if without WAYLAND_DISPLAY, --display DISPLAY
+   works, but gdk_display_get_name always return "wayland-0", which
+   may be different from DISPLAY.  If with WAYLAND_DISPLAY, then it
+   always returns WAYLAND_DISPLAY.  So pgtk Emacs is confused and
+   enters multi display environment.  To workaround this situation,
+   treat all the wayland-* as the same display.  */
 static Lisp_Object
-is_wayland_display(Lisp_Object dpyname)
+is_wayland_display (Lisp_Object dpyname)
 {
   const char *p = SSDATA (dpyname);
-  if (strncmp(p, "wayland-", 8) != 0)
+  if (strncmp (p, "wayland-", 8) != 0)
     return Qnil;
   p += 8;
   do {
@@ -156,7 +141,7 @@ pgtk_display_info_for_name (Lisp_Object name)
 
   CHECK_STRING (name);
 
-  if (!NILP (is_wayland_display(name)))
+  if (!NILP (is_wayland_display (name)))
     {
       for (dpyinfo = x_display_list; dpyinfo; dpyinfo = dpyinfo->next)
 	if (!NILP (is_wayland_display (XCAR (dpyinfo->name_list_element))))
@@ -179,8 +164,6 @@ pgtk_display_info_for_name (Lisp_Object name)
   if (dpyinfo == 0)
     error ("Cannot connect to display server %s", SDATA (name));
 
-  XSETFASTINT (Vwindow_system_version, 11);
-
   return dpyinfo;
 }
 
@@ -192,49 +175,76 @@ pgtk_display_info_for_name (Lisp_Object name)
 
 
 static void
-x_set_foreground_color (struct frame *f, Lisp_Object arg, Lisp_Object oldval)
+pgtk_set_foreground_color (struct frame *f, Lisp_Object arg, Lisp_Object oldval)
 {
-  unsigned long fg;
+  unsigned long fg, old_fg;
 
+  block_input ();
+  old_fg = FRAME_FOREGROUND_COLOR (f);
   fg = x_decode_color (f, arg, BLACK_PIX_DEFAULT (f));
   FRAME_FOREGROUND_PIXEL (f) = fg;
   FRAME_X_OUTPUT (f)->foreground_color = fg;
 
   if (FRAME_GTK_WIDGET (f))
     {
+      if (FRAME_X_OUTPUT (f)->cursor_color == old_fg)
+	{
+	  FRAME_X_OUTPUT (f)->cursor_color = fg;
+	  FRAME_X_OUTPUT (f)->cursor_xgcv.background = fg;
+	}
+
       update_face_from_frame_parameter (f, Qforeground_color, arg);
-      /*recompute_basic_faces (f); */
       if (FRAME_VISIBLE_P (f))
 	SET_FRAME_GARBAGED (f);
     }
+  unblock_input ();
 }
 
 
 static void
-x_set_background_color (struct frame *f, Lisp_Object arg, Lisp_Object oldval)
+pgtk_set_background_color (struct frame *f, Lisp_Object arg, Lisp_Object oldval)
 {
   unsigned long bg;
 
+  block_input ();
   bg = x_decode_color (f, arg, WHITE_PIX_DEFAULT (f));
   FRAME_BACKGROUND_PIXEL (f) = bg;
 
-  /* clear the frame */
+  /* Clear the frame.  */
   if (FRAME_VISIBLE_P (f))
     pgtk_clear_frame (f);
 
-  PGTK_TRACE ("x_set_background_color: col.pixel=%08lx.", bg);
   FRAME_X_OUTPUT (f)->background_color = bg;
+  FRAME_X_OUTPUT (f)->cursor_xgcv.foreground = bg;
 
   xg_set_background_color (f, bg);
   update_face_from_frame_parameter (f, Qbackground_color, arg);
 
-  PGTK_TRACE ("visible_p=%d.", FRAME_VISIBLE_P (f));
   if (FRAME_VISIBLE_P (f))
     SET_FRAME_GARBAGED (f);
+  unblock_input ();
 }
 
 static void
-x_set_border_color (struct frame *f, Lisp_Object arg, Lisp_Object oldval)
+pgtk_set_alpha_background (struct frame *f, Lisp_Object arg, Lisp_Object oldval)
+{
+  gui_set_alpha_background (f, arg, oldval);
+
+  /* This prevents GTK from painting the window's background, which
+     interferes with transparent background in some environments */
+
+  gtk_widget_set_app_paintable (FRAME_GTK_OUTER_WIDGET (f),
+				f->alpha_background != 1.0);
+
+  if (FRAME_GTK_OUTER_WIDGET (f)
+      && gtk_widget_get_realized (FRAME_GTK_OUTER_WIDGET (f))
+      && f->alpha_background != 1.0)
+    gdk_window_set_opaque_region (gtk_widget_get_window (FRAME_GTK_OUTER_WIDGET (f)),
+				  NULL);
+}
+
+static void
+pgtk_set_border_color (struct frame *f, Lisp_Object arg, Lisp_Object oldval)
 {
   int pix;
 
@@ -245,7 +255,7 @@ x_set_border_color (struct frame *f, Lisp_Object arg, Lisp_Object oldval)
 }
 
 static void
-x_set_cursor_color (struct frame *f, Lisp_Object arg, Lisp_Object oldval)
+pgtk_set_cursor_color (struct frame *f, Lisp_Object arg, Lisp_Object oldval)
 {
   unsigned long fore_pixel, pixel;
   struct pgtk_output *x = f->output_data.pgtk;
@@ -311,8 +321,6 @@ pgtk_set_name_internal (struct frame *f, Lisp_Object name)
 static void
 pgtk_set_name (struct frame *f, Lisp_Object name, int explicit)
 {
-  PGTK_TRACE ("pgtk_set_name");
-
   /* Make sure that requests from lisp code override requests from
      Emacs redisplay code.  */
   if (explicit)
@@ -350,9 +358,9 @@ pgtk_set_name (struct frame *f, Lisp_Object name, int explicit)
    specified a name for the frame; the name will override any set by the
    redisplay code.  */
 static void
-x_explicitly_set_name (struct frame *f, Lisp_Object arg, Lisp_Object oldval)
+pgtk_explicitly_set_name (struct frame *f, Lisp_Object arg,
+			  Lisp_Object oldval)
 {
-  PGTK_TRACE ("x_explicitly_set_name");
   pgtk_set_name (f, arg, true);
 }
 
@@ -364,7 +372,6 @@ void
 pgtk_implicitly_set_name (struct frame *f, Lisp_Object arg,
 			  Lisp_Object oldval)
 {
-  PGTK_TRACE ("x_implicitly_set_name");
   pgtk_set_name (f, arg, false);
 }
 
@@ -373,9 +380,8 @@ pgtk_implicitly_set_name (struct frame *f, Lisp_Object arg,
    If NAME is nil, use the frame name as the title.  */
 
 static void
-x_set_title (struct frame *f, Lisp_Object name, Lisp_Object old_name)
+pgtk_set_title (struct frame *f, Lisp_Object name, Lisp_Object old_name)
 {
-  PGTK_TRACE ("x_set_title");
   /* Don't change the title if it's already NAME.  */
   if (EQ (name, f->title))
     return;
@@ -400,7 +406,7 @@ pgtk_set_doc_edited (void)
 
 
 static void
-x_set_menu_bar_lines (struct frame *f, Lisp_Object value, Lisp_Object oldval)
+pgtk_set_menu_bar_lines (struct frame *f, Lisp_Object value, Lisp_Object oldval)
 {
   int nlines;
   /* Right now, menu bars don't work properly in minibuf-only frames;
@@ -411,7 +417,7 @@ x_set_menu_bar_lines (struct frame *f, Lisp_Object value, Lisp_Object oldval)
     return;
 
   if (TYPE_RANGED_FIXNUMP (int, value))
-      nlines = XFIXNUM (value);
+    nlines = XFIXNUM (value);
   else
     nlines = 0;
 
@@ -446,7 +452,7 @@ x_set_menu_bar_lines (struct frame *f, Lisp_Object value, Lisp_Object oldval)
    The frame's height doesn't change.  */
 
 static void
-x_set_tab_bar_lines (struct frame *f, Lisp_Object value, Lisp_Object oldval)
+pgtk_set_tab_bar_lines (struct frame *f, Lisp_Object value, Lisp_Object oldval)
 {
   int nlines;
 
@@ -460,18 +466,24 @@ x_set_tab_bar_lines (struct frame *f, Lisp_Object value, Lisp_Object oldval)
   else
     nlines = 0;
 
-  x_change_tab_bar_height (f, nlines * FRAME_LINE_HEIGHT (f));
+  pgtk_change_tab_bar_height (f, nlines * FRAME_LINE_HEIGHT (f));
 }
-
 
 /* Set the pixel height of the tab bar of frame F to HEIGHT.  */
 void
-x_change_tab_bar_height (struct frame *f, int height)
+pgtk_change_tab_bar_height (struct frame *f, int height)
 {
   int unit = FRAME_LINE_HEIGHT (f);
   int old_height = FRAME_TAB_BAR_HEIGHT (f);
-  int lines = (height + unit - 1) / unit;
-  Lisp_Object fullscreen = get_frame_param (f, Qfullscreen);
+
+  /* This differs from the tool bar code in that the tab bar height is
+     not rounded up.  Otherwise, if redisplay_tab_bar decides to grow
+     the tab bar by even 1 pixel, FRAME_TAB_BAR_LINES will be changed,
+     leading to the tab bar height being incorrectly set upon the next
+     call to x_set_font.  (bug#59285) */
+  int lines = height / unit;
+  if (lines == 0 && height != 0)
+    lines = 1;
 
   /* Make sure we redisplay all windows in this frame.  */
   fset_redisplay (f);
@@ -492,6 +504,8 @@ x_change_tab_bar_height (struct frame *f, int height)
 
   if (!f->tab_bar_resized)
     {
+      Lisp_Object fullscreen = get_frame_param (f, Qfullscreen);
+
       /* As long as tab_bar_resized is false, effectively try to change
         F's native height.  */
       if (NILP (fullscreen) || EQ (fullscreen, Qfullwidth))
@@ -536,10 +550,9 @@ x_change_tool_bar_height (struct frame *f, int height)
     }
 }
 
-
-/* toolbar support */
+/* Toolbar support.  */
 static void
-x_set_tool_bar_lines (struct frame *f, Lisp_Object value, Lisp_Object oldval)
+pgtk_set_tool_bar_lines (struct frame *f, Lisp_Object value, Lisp_Object oldval)
 {
   int nlines;
 
@@ -558,27 +571,33 @@ x_set_tool_bar_lines (struct frame *f, Lisp_Object value, Lisp_Object oldval)
 }
 
 static void
-x_set_child_frame_border_width (struct frame *f, Lisp_Object arg, Lisp_Object oldval)
+pgtk_set_child_frame_border_width (struct frame *f, Lisp_Object arg, Lisp_Object oldval)
 {
-  int border = check_int_nonnegative (arg);
+  int border;
+
+  if (NILP (arg))
+    border = -1;
+  else if (RANGED_FIXNUMP (0, arg, INT_MAX))
+    border = XFIXNAT (arg);
+  else
+    signal_error ("Invalid child frame border width", arg);
 
   if (border != FRAME_CHILD_FRAME_BORDER_WIDTH (f))
     {
       f->child_frame_border_width = border;
 
-      if (FRAME_X_WINDOW (f))
+      if (FRAME_GTK_WIDGET (f))
 	{
-	  adjust_frame_size (f, -1, -1, 3, false, Qchild_frame_border_width);
+	  adjust_frame_size (f, -1, -1, 3,
+			     false, Qchild_frame_border_width);
 	  pgtk_clear_under_internal_border (f);
 	}
     }
-
 }
 
-
 static void
-x_set_internal_border_width (struct frame *f, Lisp_Object arg,
-			     Lisp_Object oldval)
+pgtk_set_internal_border_width (struct frame *f, Lisp_Object arg,
+				Lisp_Object oldval)
 {
   int border = check_int_nonnegative (arg);
 
@@ -594,15 +613,14 @@ x_set_internal_border_width (struct frame *f, Lisp_Object arg,
     }
 }
 
-
 static void
-x_set_icon_type (struct frame *f, Lisp_Object arg, Lisp_Object oldval)
+pgtk_set_icon_type (struct frame *f, Lisp_Object arg, Lisp_Object oldval)
 {
   bool result;
 
   if (STRINGP (arg))
     {
-      if (STRINGP (oldval) && EQ (Fstring_equal (oldval, arg), Qt))
+      if (STRINGP (oldval) && BASE_EQ (Fstring_equal (oldval, arg), Qt))
 	return;
     }
   else if (!STRINGP (oldval) && NILP (oldval) == NILP (arg))
@@ -625,15 +643,14 @@ x_set_icon_type (struct frame *f, Lisp_Object arg, Lisp_Object oldval)
   unblock_input ();
 }
 
-
 static void
-x_set_icon_name (struct frame *f, Lisp_Object arg, Lisp_Object oldval)
+pgtk_set_icon_name (struct frame *f, Lisp_Object arg, Lisp_Object oldval)
 {
   bool result;
 
   if (STRINGP (arg))
     {
-      if (STRINGP (oldval) && EQ (Fstring_equal (oldval, arg), Qt))
+      if (STRINGP (oldval) && BASE_EQ (Fstring_equal (oldval, arg), Qt))
 	return;
     }
   else if (!NILP (arg) || NILP (oldval))
@@ -658,68 +675,19 @@ x_set_icon_name (struct frame *f, Lisp_Object arg, Lisp_Object oldval)
   unblock_input ();
 }
 
-/* This is the same as the xfns.c definition.  */
 static void
-x_set_cursor_type (struct frame *f, Lisp_Object arg, Lisp_Object oldval)
+pgtk_set_cursor_type (struct frame *f, Lisp_Object arg, Lisp_Object oldval)
 {
   set_frame_cursor_types (f, arg);
 }
 
-/* called to set mouse pointer color, but all other terms use it to
-   initialize pointer types (and don't set the color ;) */
 static void
-x_set_mouse_color (struct frame *f, Lisp_Object arg, Lisp_Object oldval)
+pgtk_set_mouse_color (struct frame *f, Lisp_Object arg, Lisp_Object oldval)
 {
 }
 
-
 static void
-x_icon (struct frame *f, Lisp_Object parms)
-/* --------------------------------------------------------------------------
-   Strangely-named function to set icon position parameters in frame.
-   This is irrelevant under macOS, but might be needed under GNUstep,
-   depending on the window manager used.  Note, this is not a standard
-   frame parameter-setter; it is called directly from x-create-frame.
-   -------------------------------------------------------------------------- */
-{
-#if 0
-  Lisp_Object icon_x, icon_y;
-  struct pgtk_display_info *dpyinfo = check_pgtk_display_info (Qnil);
-
-  FRAME_X_OUTPUT (f)->icon_top = -1;
-  FRAME_X_OUTPUT (f)->icon_left = -1;
-
-  /* Set the position of the icon.  */
-  icon_x =
-    gui_display_get_arg (dpyinfo, parms, Qicon_left, 0, 0, RES_TYPE_NUMBER);
-  icon_y =
-    gui_display_get_arg (dpyinfo, parms, Qicon_top, 0, 0, RES_TYPE_NUMBER);
-  if (!EQ (icon_x, Qunbound) && !EQ (icon_y, Qunbound))
-    {
-      CHECK_NUMBER (icon_x);
-      CHECK_NUMBER (icon_y);
-      FRAME_X_OUTPUT (f)->icon_top = XFIXNUM (icon_y);
-      FRAME_X_OUTPUT (f)->icon_left = XFIXNUM (icon_x);
-    }
-  else if (!EQ (icon_x, Qunbound) || !EQ (icon_y, Qunbound))
-    error ("Both left and top icon corners of icon must be specified");
-#endif
-}
-
-/**
- * x_set_undecorated:
- *
- * Set frame F's `undecorated' parameter.  If non-nil, F's window-system
- * window is drawn without decorations, title, minimize/maximize boxes
- * and external borders.  This usually means that the window cannot be
- * dragged, resized, iconified, maximized or deleted with the mouse.  If
- * nil, draw the frame with all the elements listed above unless these
- * have been suspended via window manager settings.
- *
- * Some window managers may not honor this parameter.
- */
-static void
-x_set_undecorated (struct frame *f, Lisp_Object new_value,
+pgtk_set_undecorated (struct frame *f, Lisp_Object new_value,
 		   Lisp_Object old_value)
 {
   if (!EQ (new_value, old_value))
@@ -729,18 +697,8 @@ x_set_undecorated (struct frame *f, Lisp_Object new_value,
     }
 }
 
-/**
- * x_set_skip_taskbar:
- *
- * Set frame F's `skip-taskbar' parameter.  If non-nil, this should
- * remove F's icon from the taskbar associated with the display of F's
- * window-system window and inhibit switching to F's window via
- * <Alt>-<TAB>.  If nil, lift these restrictions.
- *
- * Some window managers may not honor this parameter.
- */
 static void
-x_set_skip_taskbar (struct frame *f, Lisp_Object new_value,
+pgtk_set_skip_taskbar (struct frame *f, Lisp_Object new_value,
 		    Lisp_Object old_value)
 {
   if (!EQ (new_value, old_value))
@@ -750,18 +708,9 @@ x_set_skip_taskbar (struct frame *f, Lisp_Object new_value,
     }
 }
 
-/**
- * x_set_override_redirect:
- *
- * Set frame F's `override_redirect' parameter which, if non-nil, hints
- * that the window manager doesn't want to deal with F.  Usually, such
- * frames have no decorations and always appear on top of all frames.
- *
- * Some window managers may not honor this parameter.
- */
 static void
-x_set_override_redirect (struct frame *f, Lisp_Object new_value,
-			 Lisp_Object old_value)
+pgtk_set_override_redirect (struct frame *f, Lisp_Object new_value,
+			    Lisp_Object old_value)
 {
   if (!EQ (new_value, old_value))
     {
@@ -776,9 +725,7 @@ x_set_override_redirect (struct frame *f, Lisp_Object new_value,
     }
 }
 
-/* Set icon from FILE for frame F.  By using GTK functions the icon
-   may be any format that GdkPixbuf knows about, i.e. not just bitmaps.  */
-
+/* Set icon from FILE for frame F.  */
 bool
 xg_set_icon (struct frame *f, Lisp_Object file)
 {
@@ -870,6 +817,9 @@ pgtk_set_scroll_bar_foreground (struct frame *f, Lisp_Object new_value,
   GtkCssProvider *css_provider =
     FRAME_X_OUTPUT (f)->scrollbar_foreground_css_provider;
 
+  if (FRAME_TOOLTIP_P (f))
+    return;
+
   if (NILP (new_value))
     {
       gtk_css_provider_load_from_data (css_provider, "", -1, NULL);
@@ -882,13 +832,10 @@ pgtk_set_scroll_bar_foreground (struct frame *f, Lisp_Object new_value,
       if (!pgtk_parse_color (f, SSDATA (new_value), &rgb))
 	error ("Unknown color.");
 
-      /* On pgtk, this frame parameter should be ignored, and honor gtk theme. */
-#if 0
       char css[64];
       sprintf (css, "scrollbar slider { background-color: #%06x; }",
 	       (unsigned int) rgb.pixel & 0xffffff);
       gtk_css_provider_load_from_data (css_provider, css, -1, NULL);
-#endif
       update_face_from_frame_parameter (f, Qscroll_bar_foreground, new_value);
 
     }
@@ -915,13 +862,13 @@ pgtk_set_scroll_bar_background (struct frame *f, Lisp_Object new_value,
       if (!pgtk_parse_color (f, SSDATA (new_value), &rgb))
 	error ("Unknown color.");
 
-      /* On pgtk, this frame parameter should be ignored, and honor gtk theme. */
-#if 0
+      /* On pgtk, this frame parameter should be ignored, and honor
+	 gtk theme.  (It honors the GTK theme if not explicitly set, so
+	 I see no harm in letting users tinker a bit more.)  */
       char css[64];
       sprintf (css, "scrollbar trough { background-color: #%06x; }",
 	       (unsigned int) rgb.pixel & 0xffffff);
       gtk_css_provider_load_from_data (css_provider, css, -1, NULL);
-#endif
       update_face_from_frame_parameter (f, Qscroll_bar_background, new_value);
 
     }
@@ -1000,58 +947,59 @@ unless TYPE is `png'.  */)
   return pgtk_cr_export_frames (frames, surface_type);
 }
 
-
-/* Note: see frame.c for template, also where generic functions are impl */
-frame_parm_handler pgtk_frame_parm_handlers[] = {
-  gui_set_autoraise,		/* generic OK */
-  gui_set_autolower,		/* generic OK */
-  x_set_background_color,
-  x_set_border_color,
-  gui_set_border_width,
-  x_set_cursor_color,
-  x_set_cursor_type,
-  gui_set_font,			/* generic OK */
-  x_set_foreground_color,
-  x_set_icon_name,
-  x_set_icon_type,
-  x_set_child_frame_border_width,
-  x_set_internal_border_width,	/* generic OK */
-  gui_set_right_divider_width,
-  gui_set_bottom_divider_width,
-  x_set_menu_bar_lines,
-  x_set_mouse_color,
-  x_explicitly_set_name,
-  gui_set_scroll_bar_width,	/* generic OK */
-  gui_set_scroll_bar_height,	/* generic OK */
-  x_set_title,
-  gui_set_unsplittable,		/* generic OK */
-  gui_set_vertical_scroll_bars,	/* generic OK */
-  gui_set_horizontal_scroll_bars,	/* generic OK */
-  gui_set_visibility,		/* generic OK */
-  x_set_tab_bar_lines,
-  x_set_tool_bar_lines,
-  pgtk_set_scroll_bar_foreground,
-  pgtk_set_scroll_bar_background,
-  gui_set_screen_gamma,		/* generic OK */
-  gui_set_line_spacing,		/* generic OK, sets f->extra_line_spacing to int */
-  gui_set_left_fringe,		/* generic OK */
-  gui_set_right_fringe,		/* generic OK */
-  0,				/* x_set_wait_for_wm */
-  gui_set_fullscreen,		/* generic OK */
-  gui_set_font_backend,		/* generic OK */
-  gui_set_alpha,
-  pgtk_set_sticky,
-  pgtk_set_tool_bar_position,
-  0,				/* x_set_inhibit_double_buffering */
-  x_set_undecorated,
-  x_set_parent_frame,
-  x_set_skip_taskbar,
-  x_set_no_focus_on_map,
-  x_set_no_accept_focus,
-  x_set_z_group,
-  x_set_override_redirect,
-  gui_set_no_special_glyphs,
-};
+frame_parm_handler pgtk_frame_parm_handlers[] =
+  {
+    gui_set_autoraise,		/* generic OK */
+    gui_set_autolower,		/* generic OK */
+    pgtk_set_background_color,
+    pgtk_set_border_color,
+    gui_set_border_width,
+    pgtk_set_cursor_color,
+    pgtk_set_cursor_type,
+    gui_set_font,		/* generic OK */
+    pgtk_set_foreground_color,
+    pgtk_set_icon_name,
+    pgtk_set_icon_type,
+    pgtk_set_child_frame_border_width,
+    pgtk_set_internal_border_width,	/* generic OK */
+    gui_set_right_divider_width,
+    gui_set_bottom_divider_width,
+    pgtk_set_menu_bar_lines,
+    pgtk_set_mouse_color,
+    pgtk_explicitly_set_name,
+    gui_set_scroll_bar_width,	/* generic OK */
+    gui_set_scroll_bar_height,	/* generic OK */
+    pgtk_set_title,
+    gui_set_unsplittable,	/* generic OK */
+    gui_set_vertical_scroll_bars,	/* generic OK */
+    gui_set_horizontal_scroll_bars,	/* generic OK */
+    gui_set_visibility,		/* generic OK */
+    pgtk_set_tab_bar_lines,
+    pgtk_set_tool_bar_lines,
+    pgtk_set_scroll_bar_foreground,
+    pgtk_set_scroll_bar_background,
+    gui_set_screen_gamma,	/* generic OK */
+    gui_set_line_spacing,	/* generic OK, sets f->extra_line_spacing to int */
+    gui_set_left_fringe,	/* generic OK */
+    gui_set_right_fringe,	/* generic OK */
+    0,
+    gui_set_fullscreen,		/* generic OK */
+    gui_set_font_backend,	/* generic OK */
+    gui_set_alpha,
+    pgtk_set_sticky,
+    pgtk_set_tool_bar_position,
+    0,
+    pgtk_set_undecorated,
+    pgtk_set_parent_frame,
+    pgtk_set_skip_taskbar,
+    pgtk_set_no_focus_on_map,
+    pgtk_set_no_accept_focus,
+    pgtk_set_z_group,
+    pgtk_set_override_redirect,
+    gui_set_no_special_glyphs,
+    pgtk_set_alpha_background,
+    NULL,
+  };
 
 
 /* Handler for signals raised during x_create_frame and
@@ -1083,7 +1031,7 @@ unwind_create_frame (Lisp_Object frame)
 	  && FRAME_IMAGE_CACHE (f)->refcount == image_cache_refcount)
 	FRAME_IMAGE_CACHE (f)->refcount++;
 
-      x_free_frame_resources (f);
+      pgtk_free_frame_resources (f);
       free_glyphs (f);
       return Qt;
     }
@@ -1128,7 +1076,7 @@ pgtk_default_font_parameter (struct frame *f, Lisp_Object parms)
     gui_display_get_arg (dpyinfo, parms, Qfont, NULL, NULL,
 			 RES_TYPE_STRING);
   Lisp_Object font = Qnil;
-  if (EQ (font_param, Qunbound))
+  if (BASE_EQ (font_param, Qunbound))
     font_param = Qnil;
 
   if (NILP (font_param))
@@ -1173,17 +1121,26 @@ pgtk_default_font_parameter (struct frame *f, Lisp_Object parms)
       if (NILP (font))
 	error ("No suitable font was found");
     }
-  else if (!NILP (font_param))
-    {
-      /* Remember the explicit font parameter, so we can re-apply it after
-         we've applied the `default' face settings.  */
-      AUTO_FRAME_ARG (arg, Qfont_parameter, font_param);
-      gui_set_frame_parameters (f, arg);
-    }
 
   /* This call will make X resources override any system font setting.  */
   gui_default_parameter (f, parms, Qfont, font, "font", "Font",
 			 RES_TYPE_STRING);
+}
+
+static void
+update_watched_scale_factor (struct atimer *timer)
+{
+  struct frame *f = timer->client_data;
+  double scale_factor = FRAME_SCALE_FACTOR (f);
+
+  if (scale_factor != FRAME_X_OUTPUT (f)->watched_scale_factor)
+    {
+      FRAME_X_OUTPUT (f)->watched_scale_factor = scale_factor;
+      pgtk_cr_update_surface_desired_size (f,
+					   FRAME_CR_SURFACE_DESIRED_WIDTH (f),
+					   FRAME_CR_SURFACE_DESIRED_HEIGHT (f),
+					   true);
+    }
 }
 
 /* ==========================================================================
@@ -1200,7 +1157,7 @@ incorrect when you specify fractional scale factor in compositor.
 If you set scale factor by this function, it is used instead of Gdk's one.
 
 Pass nil as SCALE-FACTOR if you want to reset the specified monitor's
-scale factor. */ )
+scale factor.  */)
   (Lisp_Object monitor_model, Lisp_Object scale_factor)
 {
   CHECK_STRING (monitor_model);
@@ -1229,9 +1186,7 @@ scale factor. */ )
 					    monitor_scale_factor_alist);
     }
   else
-    {
-      Fsetcdr (tem, scale_factor);
-    }
+    Fsetcdr (tem, scale_factor);
 
   return scale_factor;
 }
@@ -1253,7 +1208,7 @@ This function is an internal primitive--use `make-frame' instead.  */ )
   bool minibuffer_only = false;
   bool undecorated = false, override_redirect = false;
   long window_prompting = 0;
-  ptrdiff_t count = SPECPDL_INDEX ();
+  specpdl_ref count = SPECPDL_INDEX ();
   Lisp_Object display;
   struct pgtk_display_info *dpyinfo = NULL;
   Lisp_Object parent, parent_frame;
@@ -1267,10 +1222,10 @@ This function is an internal primitive--use `make-frame' instead.  */ )
 
   display =
     gui_display_get_arg (dpyinfo, parms, Qterminal, 0, 0, RES_TYPE_NUMBER);
-  if (EQ (display, Qunbound))
+  if (BASE_EQ (display, Qunbound))
     display =
       gui_display_get_arg (dpyinfo, parms, Qdisplay, 0, 0, RES_TYPE_STRING);
-  if (EQ (display, Qunbound))
+  if (BASE_EQ (display, Qunbound))
     display = Qnil;
   dpyinfo = check_pgtk_display_info (display);
   kb = dpyinfo->terminal->kboard;
@@ -1281,7 +1236,7 @@ This function is an internal primitive--use `make-frame' instead.  */ )
   name =
     gui_display_get_arg (dpyinfo, parms, Qname, "name", "Name",
 			 RES_TYPE_STRING);
-  if (!STRINGP (name) && !EQ (name, Qunbound) && !NILP (name))
+  if (!STRINGP (name) && !BASE_EQ (name, Qunbound) && !NILP (name))
     error ("Invalid frame name--not a string or nil");
 
   if (STRINGP (name))
@@ -1291,7 +1246,7 @@ This function is an internal primitive--use `make-frame' instead.  */ )
   parent =
     gui_display_get_arg (dpyinfo, parms, Qparent_id, NULL, NULL,
 			 RES_TYPE_NUMBER);
-  if (EQ (parent, Qunbound))
+  if (BASE_EQ (parent, Qunbound))
     parent = Qnil;
   if (!NILP (parent))
     CHECK_NUMBER (parent);
@@ -1317,7 +1272,7 @@ This function is an internal primitive--use `make-frame' instead.  */ )
 			 RES_TYPE_SYMBOL);
   /* Accept parent-frame iff parent-id was not specified.  */
   if (!NILP (parent)
-      || EQ (parent_frame, Qunbound)
+      || BASE_EQ (parent_frame, Qunbound)
       || NILP (parent_frame)
       || !FRAMEP (parent_frame)
       || !FRAME_LIVE_P (XFRAME (parent_frame))
@@ -1331,7 +1286,7 @@ This function is an internal primitive--use `make-frame' instead.  */ )
       (tem =
        (gui_display_get_arg
 	(dpyinfo, parms, Qundecorated, NULL, NULL, RES_TYPE_BOOLEAN)))
-      && !(EQ (tem, Qunbound)))
+      && !(BASE_EQ (tem, Qunbound)))
     undecorated = true;
 
   FRAME_UNDECORATED (f) = undecorated;
@@ -1341,7 +1296,7 @@ This function is an internal primitive--use `make-frame' instead.  */ )
       (tem =
        (gui_display_get_arg
 	(dpyinfo, parms, Qoverride_redirect, NULL, NULL, RES_TYPE_BOOLEAN)))
-      && !(EQ (tem, Qunbound)))
+      && !(BASE_EQ (tem, Qunbound)))
     override_redirect = true;
 
   FRAME_OVERRIDE_REDIRECT (f) = override_redirect;
@@ -1353,9 +1308,6 @@ This function is an internal primitive--use `make-frame' instead.  */ )
 
   f->output_method = output_pgtk;
   FRAME_X_OUTPUT (f) = xzalloc (sizeof *FRAME_X_OUTPUT (f));
-#if 0
-  FRAME_X_OUTPUT (f)->icon_bitmap = -1;
-#endif
   FRAME_FONTSET (f) = -1;
   FRAME_X_OUTPUT (f)->white_relief.pixel = -1;
   FRAME_X_OUTPUT (f)->black_relief.pixel = -1;
@@ -1420,7 +1372,7 @@ This function is an internal primitive--use `make-frame' instead.  */ )
 
   /* Set the name; the functions to which we pass f expect the name to
      be set.  */
-  if (EQ (name, Qunbound) || NILP (name))
+  if (BASE_EQ (name, Qunbound) || NILP (name))
     {
       fset_name (f, build_string (dpyinfo->x_id_name));
       f->explicit_name = false;
@@ -1453,16 +1405,9 @@ This function is an internal primitive--use `make-frame' instead.  */ )
       error ("Invalid frame font");
     }
 
-  /* Frame contents get displaced if an embedded X window has a border.  */
-#if 0
-  if (!FRAME_X_EMBEDDED_P (f))
-#endif
-    gui_default_parameter (f, parms, Qborder_width, make_fixnum (0),
-			   "borderWidth", "BorderWidth", RES_TYPE_NUMBER);
+  gui_default_parameter (f, parms, Qborder_width, make_fixnum (0),
+			 "borderWidth", "BorderWidth", RES_TYPE_NUMBER);
 
-  /* This defaults to 1 in order to match xterm.  We recognize either
-     internalBorderWidth or internalBorder (which is what xterm calls
-     it).  */
   if (NILP (Fassq (Qinternal_border_width, parms)))
     {
       Lisp_Object value;
@@ -1470,9 +1415,14 @@ This function is an internal primitive--use `make-frame' instead.  */ )
       value = gui_display_get_arg (dpyinfo, parms, Qinternal_border_width,
 				   "internalBorder", "internalBorder",
 				   RES_TYPE_NUMBER);
-      if (!EQ (value, Qunbound))
+      if (!BASE_EQ (value, Qunbound))
 	parms = Fcons (Fcons (Qinternal_border_width, value), parms);
     }
+
+  gui_default_parameter (f, parms, Qinternal_border_width,
+			 make_fixnum (0),
+			 "internalBorderWidth", "internalBorderWidth",
+			 RES_TYPE_NUMBER);
 
   /* Same for child frames.  */
   if (NILP (Fassq (Qchild_frame_border_width, parms)))
@@ -1480,21 +1430,16 @@ This function is an internal primitive--use `make-frame' instead.  */ )
       Lisp_Object value;
 
       value = gui_display_get_arg (dpyinfo, parms, Qchild_frame_border_width,
-                                   "childFrameBorderWidth", "childFrameBorderWidth",
+                                   "childFrameBorder", "childFrameBorder",
                                    RES_TYPE_NUMBER);
-      if (! EQ (value, Qunbound))
+      if (! BASE_EQ (value, Qunbound))
 	parms = Fcons (Fcons (Qchild_frame_border_width, value),
 		       parms);
 
     }
 
-  gui_default_parameter (f, parms, Qchild_frame_border_width,
-			 make_fixnum (0),
+  gui_default_parameter (f, parms, Qchild_frame_border_width, Qnil,
 			 "childFrameBorderWidth", "childFrameBorderWidth",
-			 RES_TYPE_NUMBER);
-  gui_default_parameter (f, parms, Qinternal_border_width,
-			 make_fixnum (0),
-			 "internalBorderWidth", "internalBorderWidth",
 			 RES_TYPE_NUMBER);
   gui_default_parameter (f, parms, Qright_divider_width, make_fixnum (0),
 			 NULL, NULL, RES_TYPE_NUMBER);
@@ -1539,10 +1484,11 @@ This function is an internal primitive--use `make-frame' instead.  */ )
   init_frame_faces (f);
 
   /* We have to call adjust_frame_size here since otherwise
-     x_set_tool_bar_lines will already work with the character sizes
-     installed by init_frame_faces while the frame's pixel size is still
-     calculated from a character size of 1 and we subsequently hit the
-     (height >= 0) assertion in window_box_height.
+     pgtk_set_tool_bar_lines will already work with the character
+     sizes installed by init_frame_faces while the frame's pixel size
+     is still calculated from a character size of 1 and we
+     subsequently hit the (height >= 0) assertion in
+     window_box_height.
 
      The non-pixelwise code apparently worked around this because it
      had one frame line vs one toolbar line which left us with a zero
@@ -1550,14 +1496,12 @@ This function is an internal primitive--use `make-frame' instead.  */ )
 
      Also process `min-width' and `min-height' parameters right here
      because `frame-windows-min-size' needs them.  */
-  tem =
-    gui_display_get_arg (dpyinfo, parms, Qmin_width, NULL, NULL,
-			 RES_TYPE_NUMBER);
+  tem = gui_display_get_arg (dpyinfo, parms, Qmin_width, NULL, NULL,
+			     RES_TYPE_NUMBER);
   if (NUMBERP (tem))
     store_frame_param (f, Qmin_width, tem);
-  tem =
-    gui_display_get_arg (dpyinfo, parms, Qmin_height, NULL, NULL,
-			 RES_TYPE_NUMBER);
+  tem = gui_display_get_arg (dpyinfo, parms, Qmin_height, NULL, NULL,
+			     RES_TYPE_NUMBER);
   if (NUMBERP (tem))
     store_frame_param (f, Qmin_height, tem);
   adjust_frame_size (f, FRAME_COLS (f) * FRAME_COLUMN_WIDTH (f),
@@ -1604,18 +1548,19 @@ This function is an internal primitive--use `make-frame' instead.  */ )
 			 RES_TYPE_BOOLEAN);
   f->no_split = minibuffer_only || EQ (tem, Qt);
 
-#if 0
-  x_icon_verify (f, parms);
-#endif
-
-  /* Create the X widget or window.  */
-  // x_window (f);
   xg_create_frame_widgets (f);
   pgtk_set_event_handler (f);
 
+  if (FRAME_GTK_OUTER_WIDGET (f))
+    gtk_widget_realize (FRAME_GTK_OUTER_WIDGET (f));
+
+  /* Many callers (including the Lisp functions that call
+     FRAME_SCALE_FACTOR) expect the widget to be realized.  */
+  if (FRAME_GTK_WIDGET (f))
+    gtk_widget_realize (FRAME_GTK_WIDGET (f));
 
 #define INSTALL_CURSOR(FIELD, NAME) \
-  FRAME_X_OUTPUT(f)->FIELD = gdk_cursor_new_for_display(FRAME_X_DISPLAY(f), GDK_ ## NAME)
+  FRAME_X_OUTPUT (f)->FIELD = gdk_cursor_new_for_display (FRAME_X_DISPLAY (f), GDK_ ## NAME)
 
   INSTALL_CURSOR (text_cursor, XTERM);
   INSTALL_CURSOR (nontext_cursor, LEFT_PTR);
@@ -1634,11 +1579,6 @@ This function is an internal primitive--use `make-frame' instead.  */ )
   INSTALL_CURSOR (bottom_left_corner_cursor, BOTTOM_LEFT_CORNER);
 
 #undef INSTALL_CURSOR
-
-  x_icon (f, parms);
-#if 0
-  x_make_gc (f);
-#endif
 
   /* Now consider the frame official.  */
   f->terminal->reference_count++;
@@ -1663,6 +1603,8 @@ This function is an internal primitive--use `make-frame' instead.  */ )
 			 RES_TYPE_NUMBER);
   gui_default_parameter (f, parms, Qalpha, Qnil,
 			 "alpha", "Alpha", RES_TYPE_NUMBER);
+  gui_default_parameter (f, parms, Qalpha_background, Qnil,
+                         "alphaBackground", "AlphaBackground", RES_TYPE_NUMBER);
 
   if (!NILP (parent_frame))
     {
@@ -1670,7 +1612,6 @@ This function is an internal primitive--use `make-frame' instead.  */ )
 
       block_input ();
 
-      PGTK_TRACE ("x_set_parent_frame x: %d, y: %d", f->left_pos, f->top_pos);
       GtkWidget *fixed = FRAME_GTK_WIDGET (f);
       GtkWidget *fixed_of_p = FRAME_GTK_WIDGET (p);
       GtkWidget *whbox_of_f = gtk_widget_get_parent (fixed);
@@ -1693,13 +1634,12 @@ This function is an internal primitive--use `make-frame' instead.  */ )
       unblock_input ();
     }
 
-  if (FRAME_GTK_OUTER_WIDGET (f)) {
-    GList *w = gtk_container_get_children(GTK_CONTAINER(FRAME_GTK_OUTER_WIDGET (f)));
-    for (; w != NULL; w = w->next)
-      {
-	gtk_widget_show_all (GTK_WIDGET(w->data));
-      }
-  }
+  if (FRAME_GTK_OUTER_WIDGET (f))
+    {
+      GList *w = gtk_container_get_children (GTK_CONTAINER (FRAME_GTK_OUTER_WIDGET (f)));
+      for (; w != NULL; w = w->next)
+	gtk_widget_show_all (GTK_WIDGET (w->data));
+    }
 
   gui_default_parameter (f, parms, Qno_focus_on_map, Qnil,
 			 NULL, NULL, RES_TYPE_BOOLEAN);
@@ -1722,7 +1662,7 @@ This function is an internal primitive--use `make-frame' instead.  */ )
      badly we want them.  This should be done after we have the menu
      bar so that its size can be taken into account.  */
   block_input ();
-  x_wm_set_size_hint (f, window_prompting, false);
+  xg_wm_set_size_hint (f, window_prompting, false);
   unblock_input ();
 
   adjust_frame_size (f, FRAME_TEXT_WIDTH (f), FRAME_TEXT_HEIGHT (f),
@@ -1739,21 +1679,38 @@ This function is an internal primitive--use `make-frame' instead.  */ )
      cannot control visibility, so don't try.  */
   if (!FRAME_X_OUTPUT (f)->explicit_parent)
     {
+      /* When called from `x-create-frame-with-faces' visibility is
+	 always explicitly nil.  */
       Lisp_Object visibility
-	=
-	gui_display_get_arg (dpyinfo, parms, Qvisibility, 0, 0,
-			     RES_TYPE_SYMBOL);
+	= gui_display_get_arg (dpyinfo, parms, Qvisibility, 0, 0,
+                               RES_TYPE_SYMBOL);
+      Lisp_Object height
+	= gui_display_get_arg (dpyinfo, parms, Qheight, 0, 0, RES_TYPE_NUMBER);
+      Lisp_Object width
+	= gui_display_get_arg (dpyinfo, parms, Qwidth, 0, 0, RES_TYPE_NUMBER);
 
       if (EQ (visibility, Qicon))
-	pgtk_iconify_frame (f);
+	{
+	  f->was_invisible = true;
+	  pgtk_iconify_frame (f);
+	}
       else
 	{
-	  if (EQ (visibility, Qunbound))
+	  if (BASE_EQ (visibility, Qunbound))
 	    visibility = Qt;
 
 	  if (!NILP (visibility))
 	    pgtk_make_frame_visible (f);
+	  else
+	    f->was_invisible = true;
 	}
+
+      /* Leave f->was_invisible true only if height or width were
+	 specified too.  This takes effect only when we are not called
+	 from `x-create-frame-with-faces' (see above comment).  */
+      f->was_invisible
+	= (f->was_invisible
+	   && (!BASE_EQ (height, Qunbound) || !BASE_EQ (width, Qunbound)));
 
       store_frame_param (f, Qvisibility, visibility);
     }
@@ -1782,6 +1739,12 @@ This function is an internal primitive--use `make-frame' instead.  */ )
 
   FRAME_X_OUTPUT (f)->cr_surface_visible_bell = NULL;
   FRAME_X_OUTPUT (f)->atimer_visible_bell = NULL;
+  FRAME_X_OUTPUT (f)->watched_scale_factor = 1.0;
+  struct timespec ts = make_timespec (1, 0);
+  FRAME_X_OUTPUT (f)->scale_factor_atimer = start_atimer(ATIMER_CONTINUOUS,
+							 ts,
+							 update_watched_scale_factor,
+							 f);
 
   /* Make sure windows on this frame appear in calls to next-window
      and similar functions.  */
@@ -1790,29 +1753,10 @@ This function is an internal primitive--use `make-frame' instead.  */ )
   return unbind_to (count, frame);
 }
 
-
-#if 0
-static int
-pgtk_window_is_ancestor (PGTKWindow * win, PGTKWindow * candidate)
-/* Test whether CANDIDATE is an ancestor window of WIN. */
-{
-  if (candidate == NULL)
-    return 0;
-  else if (win == candidate)
-    return 1;
-  else
-    return pgtk_window_is_ancestor (win,[candidate parentWindow]);
-}
-#endif
-
-/**
- * x_frame_restack:
- *
- * Restack frame F1 below frame F2, above if ABOVE_FLAG is non-nil.  In
- * practice this is a two-step action: The first step removes F1's
- * window-system window from the display.  The second step reinserts
- * F1's window below (above if ABOVE_FLAG is true) that of F2.
- */
+/* Restack frame F1 below frame F2, above if ABOVE_FLAG is non-nil.
+   In practice this is a two-step action: The first step removes F1's
+   window-system window from the display.  The second step reinserts
+   F1's window below (above if ABOVE_FLAG is true) that of F2.  */
 static void
 pgtk_frame_restack (struct frame *f1, struct frame *f2, bool above_flag)
 {
@@ -1820,7 +1764,6 @@ pgtk_frame_restack (struct frame *f1, struct frame *f2, bool above_flag)
   xg_frame_restack (f1, f2, above_flag);
   unblock_input ();
 }
-
 
 DEFUN ("pgtk-frame-restack", Fpgtk_frame_restack, Spgtk_frame_restack, 2, 3, 0,
        doc: /* Restack FRAME1 below FRAME2.
@@ -1848,44 +1791,6 @@ Some window managers may refuse to restack windows.  */)
   pgtk_frame_restack (f1, f2, !NILP (above));
   return Qt;
 }
-
-DEFUN ("pgtk-popup-font-panel", Fpgtk_popup_font_panel, Spgtk_popup_font_panel,
-       0, 1, "",
-       doc: /* Pop up the font panel.  */)
-     (Lisp_Object frame)
-{
-  struct frame *f = decode_window_system_frame (frame);
-
-  Lisp_Object font;
-  Lisp_Object font_param;
-  char *default_name = NULL;
-  ptrdiff_t count = SPECPDL_INDEX ();
-
-  block_input ();
-
-  XSETFONT (font, FRAME_FONT (f));
-  font_param = Ffont_get (font, QCname);
-  if (STRINGP (font_param))
-    default_name = xlispstrdup (font_param);
-  else
-    {
-      font_param = Fframe_parameter (frame, Qfont_parameter);
-      if (STRINGP (font_param))
-        default_name = xlispstrdup (font_param);
-    }
-
-  font = xg_get_font (f, default_name);
-  xfree (default_name);
-
-  unblock_input ();
-
-  if (NILP (font))
-    quit ();
-
-  return unbind_to (count, font);
-}
-
-
 
 #ifdef HAVE_GSETTINGS
 
@@ -1997,7 +1902,7 @@ parse_resource_key (const char *res_key, char *setting_key)
 
   /* check existence of setting_key */
   GSettingsSchemaSource *ssrc = g_settings_schema_source_get_default ();
-  GSettingsSchema *scm = g_settings_schema_source_lookup (ssrc, SCHEMA_ID, FALSE);
+  GSettingsSchema *scm = g_settings_schema_source_lookup (ssrc, SCHEMA_ID, TRUE);
   if (!scm)
     return NULL;	/* *.schema.xml is not installed. */
   if (!g_settings_schema_has_key (scm, setting_key))
@@ -2123,42 +2028,6 @@ DEFUN ("x-server-max-request-size", Fx_server_max_request_size, Sx_server_max_re
 }
 
 
-DEFUN ("x-server-vendor", Fx_server_vendor, Sx_server_vendor, 0, 1, 0,
-       doc: /* Return the "vendor ID" string of the display server TERMINAL.
-\(Labeling every distributor as a "vendor" embodies the false assumption
-that operating systems cannot be developed and distributed noncommercially.)
-The optional argument TERMINAL specifies which display to ask about.
-TERMINAL should be a terminal object, a frame or a display name (a string).
-If omitted or nil, that stands for the selected frame's display.  */)
-  (Lisp_Object terminal)
-{
-  check_pgtk_display_info (terminal);
-  return Qnil;
-}
-
-
-DEFUN ("x-server-version", Fx_server_version, Sx_server_version, 0, 1, 0,
-       doc: /* Return the version numbers of the server of display TERMINAL.
-The value is a list of three integers: the major and minor
-version numbers of the X Protocol in use, and the distributor-specific release
-number.  See also the function `x-server-vendor'.
-
-The optional argument TERMINAL specifies which display to ask about.
-TERMINAL should be a terminal object, a frame or a display name (a string).
-If omitted or nil, that stands for the selected frame's display.  */ )
-  (Lisp_Object terminal)
-{
-  check_pgtk_display_info (terminal);
-  /*NOTE: it is unclear what would best correspond with "protocol";
-     we return 10.3, meaning Panther, since this is roughly the
-     level that GNUstep's APIs correspond to.
-     The last number is where we distinguish between the Apple
-     and GNUstep implementations ("distributor-specific release
-     number") and give int'ized versions of major.minor. */
-  return list3i (0, 0, 0);
-}
-
-
 DEFUN ("x-display-screens", Fx_display_screens, Sx_display_screens, 0, 1, 0,
        doc: /* Return the number of screens on the display server TERMINAL.
 The optional argument TERMINAL specifies which display to ask about.
@@ -2175,7 +2044,7 @@ use `(length \(display-monitor-attributes-list TERMINAL))' instead.  */)
 
 
 DEFUN ("x-display-mm-height", Fx_display_mm_height, Sx_display_mm_height, 0, 1, 0,
-       doc: /* Return the height in millimeters of the the display TERMINAL.
+       doc: /* Return the height in millimeters of the display TERMINAL.
 The optional argument TERMINAL specifies which display to ask about.
 TERMINAL should be a terminal object, a frame or a display name (a string).
 If omitted or nil, that stands for the selected frame's display.
@@ -2204,7 +2073,7 @@ for each physical monitor, use `display-monitor-attributes-list'.  */)
       int mm = gdk_monitor_get_height_mm (monitor);
 
       if (rec.y == 0)
-	height_mm_at_0 = max(height_mm_at_0, mm);
+	height_mm_at_0 = max (height_mm_at_0, mm);
       else
 	height_mm_at_other += mm;
     }
@@ -2216,7 +2085,7 @@ for each physical monitor, use `display-monitor-attributes-list'.  */)
 
 
 DEFUN ("x-display-mm-width", Fx_display_mm_width, Sx_display_mm_width, 0, 1, 0,
-       doc: /* Return the width in millimeters of the the display TERMINAL.
+       doc: /* Return the width in millimeters of the display TERMINAL.
 The optional argument TERMINAL specifies which display to ask about.
 TERMINAL should be a terminal object, a frame or a display name (a string).
 If omitted or nil, that stands for the selected frame's display.
@@ -2245,7 +2114,7 @@ for each physical monitor, use `display-monitor-attributes-list'.  */)
       int mm = gdk_monitor_get_width_mm (monitor);
 
       if (rec.x == 0)
-	width_mm_at_0 = max(width_mm_at_0, mm);
+	width_mm_at_0 = max (width_mm_at_0, mm);
       else
 	width_mm_at_other += mm;
     }
@@ -2257,7 +2126,7 @@ for each physical monitor, use `display-monitor-attributes-list'.  */)
 
 
 DEFUN ("x-display-backing-store", Fx_display_backing_store, Sx_display_backing_store, 0, 1, 0,
-       doc: /* Return an indication of whether the the display TERMINAL does backing store.
+       doc: /* Return an indication of whether the display TERMINAL does backing store.
 The value may be `buffered', `retained', or `non-retained'.
 The optional argument TERMINAL specifies which display to ask about.
 TERMINAL should be a terminal object, a frame or a display name (a string).
@@ -2270,7 +2139,7 @@ If omitted or nil, that stands for the selected frame's display.  */)
 
 
 DEFUN ("x-display-visual-class", Fx_display_visual_class, Sx_display_visual_class, 0, 1, 0,
-       doc: /* Return the visual class of the the display TERMINAL.
+       doc: /* Return the visual class of the display TERMINAL.
 The value is one of the symbols `static-gray', `gray-scale',
 `static-color', `pseudo-color', `true-color', or `direct-color'.
 
@@ -2312,7 +2181,6 @@ terminate Emacs if we can't open the connection.  */)
 
   CHECK_STRING (display);
 
-  nxatoms_of_pgtkselect ();
   dpyinfo = pgtk_term_init (display, SSDATA (Vx_resource_name));
   if (dpyinfo == 0)
     {
@@ -2357,27 +2225,6 @@ DEFUN ("x-display-list", Fx_display_list, Sx_display_list, 0, 0, 0,
   return result;
 }
 
-
-DEFUN ("pgtk-hide-others", Fpgtk_hide_others, Spgtk_hide_others, 0, 0, 0,
-       doc: /* Hides all applications other than Emacs.  */)
-  (void)
-{
-  check_window_system (NULL);
-  return Qnil;
-}
-
-DEFUN ("pgtk-hide-emacs", Fpgtk_hide_emacs, Spgtk_hide_emacs, 1, 1, 0,
-       doc: /* If ON is non-nil, the entire Emacs application is hidden.
-Otherwise if Emacs is hidden, it is unhidden.
-If ON is equal to `activate', Emacs is unhidden and becomes
-the active application.  */)
-  (Lisp_Object on)
-{
-  check_window_system (NULL);
-  return Qnil;
-}
-
-
 DEFUN ("pgtk-font-name", Fpgtk_font_name, Spgtk_font_name, 1, 1, 0,
        doc: /* Determine font PostScript or family name for font NAME.
 NAME should be a string containing either the font name or an XLFD
@@ -2406,13 +2253,12 @@ font descriptor.  If string contains `fontset' and not
 
    ========================================================================== */
 
-/* called from frame.c */
+/* Called from frame.c.  */
 struct pgtk_display_info *
 check_x_display_info (Lisp_Object frame)
 {
   return check_pgtk_display_info (frame);
 }
-
 
 void
 pgtk_set_scroll_bar_default_width (struct frame *f)
@@ -2434,7 +2280,7 @@ pgtk_set_scroll_bar_default_height (struct frame *f)
   FRAME_CONFIG_SCROLL_BAR_LINES (f) = (min_height + height - 1) / height;
 }
 
-/* terms impl this instead of x-get-resource directly */
+/* Terminals implement this instead of x-get-resource directly.  */
 const char *
 pgtk_get_string_resource (XrmDatabase rdb, const char *name,
 			  const char *class)
@@ -2461,9 +2307,8 @@ pgtk_get_string_resource (XrmDatabase rdb, const char *name,
   return res;
 }
 
-
 Lisp_Object
-x_get_focus_frame (struct frame *frame)
+pgtk_get_focus_frame (struct frame *frame)
 {
   struct pgtk_display_info *dpyinfo = FRAME_DISPLAY_INFO (frame);
   Lisp_Object focus;
@@ -2474,13 +2319,6 @@ x_get_focus_frame (struct frame *frame)
   XSETFRAME (focus, dpyinfo->x_focus_frame);
   return focus;
 }
-
-/* ==========================================================================
-
-    Lisp definitions that, for whatever reason, we can't alias as 'ns-XXX'.
-
-   ========================================================================== */
-
 
 DEFUN ("xw-color-defined-p", Fxw_color_defined_p, Sxw_color_defined_p, 1, 2, 0,
        doc: /* Internal function called by `color-defined-p', which see.  */)
@@ -2513,7 +2351,6 @@ DEFUN ("xw-color-values", Fxw_color_values, Sxw_color_values, 1, 2, 0,
     return Qnil;
 }
 
-
 DEFUN ("xw-display-color-p", Fxw_display_color_p, Sxw_display_color_p, 0, 1, 0,
        doc: /* Internal function called by `display-color-p', which see.  */)
   (Lisp_Object terminal)
@@ -2521,7 +2358,6 @@ DEFUN ("xw-display-color-p", Fxw_display_color_p, Sxw_display_color_p, 0, 1, 0,
   check_pgtk_display_info (terminal);
   return Qt;
 }
-
 
 DEFUN ("x-display-grayscale-p", Fx_display_grayscale_p, Sx_display_grayscale_p, 0, 1, 0,
        doc: /* Return t if the display supports shades of gray.
@@ -2533,7 +2369,6 @@ If omitted or nil, that stands for the selected frame's display.  */)
 {
   return Qnil;
 }
-
 
 DEFUN ("x-display-pixel-width", Fx_display_pixel_width, Sx_display_pixel_width, 0, 1, 0,
        doc: /* Return the width in pixels of the display TERMINAL.
@@ -2572,14 +2407,13 @@ each physical monitor, use `display-monitor-attributes-list'.  */)
       rec.width = rec.width * scale + 0.5;
       rec.height = rec.height * scale + 0.5;
 
-      width = max(width, rec.x + rec.width);
+      width = max (width, rec.x + rec.width);
     }
 
   unblock_input ();
 
   return make_fixnum (width);
 }
-
 
 DEFUN ("x-display-pixel-height", Fx_display_pixel_height, Sx_display_pixel_height, 0, 1, 0,
        doc: /* Return the height in pixels of the display TERMINAL.
@@ -2618,7 +2452,7 @@ each physical monitor, use `display-monitor-attributes-list'.  */)
       rec.width = rec.width * scale + 0.5;
       rec.height = rec.height * scale + 0.5;
 
-      height = max(height, rec.y + rec.height);
+      height = max (height, rec.y + rec.height);
     }
 
   unblock_input ();
@@ -2832,7 +2666,7 @@ x_create_tip_frame (struct pgtk_display_info *dpyinfo, Lisp_Object parms, struct
   struct frame *f;
   Lisp_Object frame;
   Lisp_Object name;
-  ptrdiff_t count = SPECPDL_INDEX ();
+  specpdl_ref count = SPECPDL_INDEX ();
   bool face_change_before = face_change;
 
   if (!dpyinfo->terminal->name)
@@ -2844,7 +2678,7 @@ x_create_tip_frame (struct pgtk_display_info *dpyinfo, Lisp_Object parms, struct
   name = gui_display_get_arg (dpyinfo, parms, Qname, "name", "Name",
                               RES_TYPE_STRING);
   if (!STRINGP (name)
-      && !EQ (name, Qunbound)
+      && !BASE_EQ (name, Qunbound)
       && !NILP (name))
     error ("Invalid frame name--not a string or nil");
 
@@ -2862,9 +2696,6 @@ x_create_tip_frame (struct pgtk_display_info *dpyinfo, Lisp_Object parms, struct
      counts etc.  */
   f->output_method = output_pgtk;
   f->output_data.pgtk = xzalloc (sizeof *f->output_data.pgtk);
-#if 0
-  f->output_data.pgtk->icon_bitmap = -1;
-#endif
   FRAME_FONTSET (f) = -1;
   f->output_data.pgtk->white_relief.pixel = -1;
   f->output_data.pgtk->black_relief.pixel = -1;
@@ -2898,7 +2729,7 @@ x_create_tip_frame (struct pgtk_display_info *dpyinfo, Lisp_Object parms, struct
 
   /* Set the name; the functions to which we pass f expect the name to
      be set.  */
-  if (EQ (name, Qunbound) || NILP (name))
+  if (BASE_EQ (name, Qunbound) || NILP (name))
     {
       fset_name (f, build_string (dpyinfo->x_id_name));
       f->explicit_name = false;
@@ -2939,7 +2770,7 @@ x_create_tip_frame (struct pgtk_display_info *dpyinfo, Lisp_Object parms, struct
       value = gui_display_get_arg (dpyinfo, parms, Qinternal_border_width,
                                    "internalBorder", "internalBorder",
                                    RES_TYPE_NUMBER);
-      if (! EQ (value, Qunbound))
+      if (! BASE_EQ (value, Qunbound))
 	parms = Fcons (Fcons (Qinternal_border_width, value),
 		       parms);
     }
@@ -2989,13 +2820,6 @@ x_create_tip_frame (struct pgtk_display_info *dpyinfo, Lisp_Object parms, struct
   gtk_window_set_decorated (GTK_WINDOW (tip_window), FALSE);
   gtk_window_set_type_hint (GTK_WINDOW (tip_window), GDK_WINDOW_TYPE_HINT_TOOLTIP);
   f->output_data.pgtk->current_cursor = f->output_data.pgtk->text_cursor;
-  gtk_widget_show_all (FRAME_GTK_OUTER_WIDGET (f));
-  gdk_window_set_cursor (gtk_widget_get_window (FRAME_GTK_OUTER_WIDGET (f)),
-			 f->output_data.pgtk->current_cursor);
-
-#if 0
-  x_make_gc (f);
-#endif
 
   gui_default_parameter (f, parms, Qauto_raise, Qnil,
                          "autoRaise", "AutoRaiseLower", RES_TYPE_BOOLEAN);
@@ -3005,6 +2829,8 @@ x_create_tip_frame (struct pgtk_display_info *dpyinfo, Lisp_Object parms, struct
                          "cursorType", "CursorType", RES_TYPE_SYMBOL);
   gui_default_parameter (f, parms, Qalpha, Qnil,
                          "alpha", "Alpha", RES_TYPE_NUMBER);
+  gui_default_parameter (f, parms, Qalpha_background, Qnil,
+                         "alphaBackground", "AlphaBackground", RES_TYPE_NUMBER);
 
   /* Add `tooltip' frame parameter's default value. */
   if (NILP (Fframe_parameter (frame, Qtooltip)))
@@ -3035,7 +2861,7 @@ x_create_tip_frame (struct pgtk_display_info *dpyinfo, Lisp_Object parms, struct
      Frame parameters may be changed if .Xdefaults contains
      specifications for the default font.  For example, if there is an
      `Emacs.default.attributeBackground: pink', the `background-color'
-     attribute of the frame get's set, which let's the internal border
+     attribute of the frame gets set, which lets the internal border
      of the tooltip frame appear in pink.  Prevent this.  */
   {
     Lisp_Object bg = Fframe_parameter (frame, Qbackground_color);
@@ -3143,8 +2969,8 @@ compute_tip_xy (struct frame *f, Lisp_Object parms, Lisp_Object dx,
     {
       min_x = 0;
       min_y = 0;
-      max_x = x_display_pixel_width (FRAME_DISPLAY_INFO (f));
-      max_y = x_display_pixel_height (FRAME_DISPLAY_INFO (f));
+      max_x = pgtk_display_pixel_width (FRAME_DISPLAY_INFO (f));
+      max_y = pgtk_display_pixel_height (FRAME_DISPLAY_INFO (f));
     }
 
   if (INTEGERP (top))
@@ -3183,7 +3009,7 @@ compute_tip_xy (struct frame *f, Lisp_Object parms, Lisp_Object dx,
 
 /* Hide tooltip.  Delete its frame if DELETE is true.  */
 static Lisp_Object
-x_hide_tip (bool delete)
+pgtk_hide_tip (bool delete)
 {
   if (!NILP (tip_timer))
     {
@@ -3197,7 +3023,7 @@ x_hide_tip (bool delete)
      value of x_gtk_use_system_tooltips might not be the same as used
      for the tooltip we have to hide, see Bug#30399.  */
   if ((NILP (tip_last_frame) && NILP (tip_frame))
-      || (!x_gtk_use_system_tooltips
+      || (!use_system_tooltips
 	  && !delete
 	  && FRAMEP (tip_frame)
 	  && FRAME_LIVE_P (XFRAME (tip_frame))
@@ -3208,10 +3034,9 @@ x_hide_tip (bool delete)
     return Qnil;
   else
     {
-      ptrdiff_t count;
       Lisp_Object was_open = Qnil;
 
-      count = SPECPDL_INDEX ();
+      specpdl_ref count = SPECPDL_INDEX ();
       specbind (Qinhibit_redisplay, Qt);
       specbind (Qinhibit_quit, Qt);
 
@@ -3230,7 +3055,7 @@ x_hide_tip (bool delete)
       /* When using GTK+ system tooltips (compare Bug#41200) reset
 	 tip_last_frame.  It will be reassigned when showing the next
 	 GTK+ system tooltip.  */
-      if (x_gtk_use_system_tooltips)
+      if (use_system_tooltips)
 	tip_last_frame = Qnil;
 
       /* Now look whether there's an Emacs tip around.  */
@@ -3240,7 +3065,7 @@ x_hide_tip (bool delete)
 
 	  if (FRAME_LIVE_P (f))
 	    {
-	      if (delete || x_gtk_use_system_tooltips)
+	      if (delete || use_system_tooltips)
 		{
 		  /* Delete the Emacs tooltip frame when DELETE is true
 		     or we change the tooltip type from an Emacs one to
@@ -3275,7 +3100,8 @@ PARMS is an optional list of frame parameters which can be used to
 change the tooltip's appearance.
 
 Automatically hide the tooltip after TIMEOUT seconds.  TIMEOUT nil
-means use the default timeout of 5 seconds.
+means use the default timeout from the `x-show-tooltip-timeout'
+variable.
 
 If the list of frame parameters PARMS contains a `left' parameter,
 display the tooltip at that x-position.  If the list of frame parameters
@@ -3303,9 +3129,12 @@ Text larger than the specified size is clipped.  */)
   struct text_pos pos;
   int width, height;
   int old_windows_or_buffers_changed = windows_or_buffers_changed;
-  ptrdiff_t count = SPECPDL_INDEX ();
-  ptrdiff_t count_1;
+  specpdl_ref count = SPECPDL_INDEX ();
   Lisp_Object window, size, tip_buf;
+  bool displayed;
+#ifdef ENABLE_CHECKING
+  struct glyph_row *row, *end;
+#endif
   AUTO_STRING (tip, " *tip*");
 
   specbind (Qinhibit_redisplay, Qt);
@@ -3322,9 +3151,8 @@ Text larger than the specified size is clipped.  */)
     return unbind_to (count, Qnil);
 
   if (NILP (timeout))
-    timeout = make_fixnum (5);
-  else
-    CHECK_FIXNAT (timeout);
+    timeout = Vx_show_tooltip_timeout;
+  CHECK_FIXNAT (timeout);
 
   if (NILP (dx))
     dx = make_fixnum (5);
@@ -3336,7 +3164,7 @@ Text larger than the specified size is clipped.  */)
   else
     CHECK_FIXNUM (dy);
 
-  if (x_gtk_use_system_tooltips)
+  if (use_system_tooltips)
     {
       bool ok;
 
@@ -3425,13 +3253,13 @@ Text larger than the specified size is clipped.  */)
 		}
 	    }
 
-	  x_hide_tip (delete);
+	  pgtk_hide_tip (delete);
 	}
       else
-	x_hide_tip (true);
+	pgtk_hide_tip (true);
     }
   else
-    x_hide_tip (true);
+    pgtk_hide_tip (true);
 
   tip_last_frame = frame;
   tip_last_string = string;
@@ -3499,7 +3327,7 @@ Text larger than the specified size is clipped.  */)
 
   /* Insert STRING into root window's buffer and fit the frame to the
      buffer.  */
-  count_1 = SPECPDL_INDEX ();
+  specpdl_ref count_1 = SPECPDL_INDEX ();
   old_buffer = current_buffer;
   set_buffer_internal_1 (XBUFFER (w->contents));
   bset_truncate_lines (current_buffer, Qnil);
@@ -3511,13 +3339,34 @@ Text larger than the specified size is clipped.  */)
   clear_glyph_matrix (w->desired_matrix);
   clear_glyph_matrix (w->current_matrix);
   SET_TEXT_POS (pos, BEGV, BEGV_BYTE);
-  try_window (window, pos, TRY_WINDOW_IGNORE_FONTS_CHANGE);
+  displayed = try_window (window, pos, TRY_WINDOW_IGNORE_FONTS_CHANGE);
+
+  if (!displayed && NILP (Vx_max_tooltip_size))
+    {
+#ifdef ENABLE_CHECKING
+      row = w->desired_matrix->rows;
+      end = w->desired_matrix->rows + w->desired_matrix->nrows;
+
+      while (row < end)
+	{
+	  if (!row->displays_text_p
+	      || row->ends_at_zv_p)
+	    break;
+	  ++row;
+	}
+
+      eassert (row < end && row->ends_at_zv_p);
+#endif
+    }
+
   /* Calculate size of tooltip window.  */
   size = Fwindow_text_pixel_size (window, Qnil, Qnil, Qnil,
-				  make_fixnum (w->pixel_height), Qnil);
+				  make_fixnum (w->pixel_height), Qnil,
+				  Qnil);
   /* Add the frame's internal border to calculated size.  */
   width = XFIXNUM (Fcar (size)) + 2 * FRAME_INTERNAL_BORDER_WIDTH (tip_f);
   height = XFIXNUM (Fcdr (size)) + 2 * FRAME_INTERNAL_BORDER_WIDTH (tip_f);
+  width += FRAME_COLUMN_WIDTH (tip_f);
 
   /* Calculate position of tooltip frame.  */
   compute_tip_xy (tip_f, parms, dx, dy, width, height, &root_x, &root_y);
@@ -3526,9 +3375,14 @@ Text larger than the specified size is clipped.  */)
   block_input ();
   gtk_window_resize (GTK_WINDOW (FRAME_GTK_OUTER_WIDGET (tip_f)), width, height);
   gtk_window_move (GTK_WINDOW (FRAME_GTK_OUTER_WIDGET (tip_f)), root_x, root_y);
+  gtk_widget_show_all (FRAME_GTK_OUTER_WIDGET (tip_f));
+  SET_FRAME_VISIBLE (tip_f, 1);
+  gdk_window_set_cursor (gtk_widget_get_window (FRAME_GTK_OUTER_WIDGET (tip_f)),
+			 f->output_data.pgtk->current_cursor);
+
   unblock_input ();
 
-  pgtk_cr_update_surface_desired_size (tip_f, width, height);
+  pgtk_cr_update_surface_desired_size (tip_f, width, height, false);
 
   w->must_be_updated_p = true;
   update_single_window (w);
@@ -3551,7 +3405,7 @@ DEFUN ("x-hide-tip", Fx_hide_tip, Sx_hide_tip, 0, 0, 0,
 Value is t if tooltip was open, nil otherwise.  */)
   (void)
 {
-  return x_hide_tip (!tooltip_reuse_hidden_frame);
+  return pgtk_hide_tip (!tooltip_reuse_hidden_frame);
 }
 
 /* Return geometric attributes of FRAME.  According to the value of
@@ -3575,17 +3429,21 @@ frame_geometry (Lisp_Object frame, Lisp_Object attribute)
 
   /* Get these here because they can't be got in configure_event(). */
   int left_pos, top_pos;
-  if (FRAME_GTK_OUTER_WIDGET (f)) {
+
+  if (FRAME_GTK_OUTER_WIDGET (f))
     gtk_window_get_position (GTK_WINDOW (FRAME_GTK_OUTER_WIDGET (f)),
 			     &left_pos, &top_pos);
-  } else {
-    if (FRAME_GTK_WIDGET (f) == NULL)
-      return Qnil;    /* This can occur while creating a frame. */
-    GtkAllocation alloc;
-    gtk_widget_get_allocation (FRAME_GTK_WIDGET (f), &alloc);
-    left_pos = alloc.x;
-    top_pos = alloc.y;
-  }
+  else
+    {
+      GtkAllocation alloc;
+
+      if (FRAME_GTK_WIDGET (f) == NULL)
+	return Qnil;    /* This can occur while creating a frame.  */
+
+      gtk_widget_get_allocation (FRAME_GTK_WIDGET (f), &alloc);
+      left_pos = alloc.x;
+      top_pos = alloc.y;
+    }
 
   int native_left = left_pos + border;
   int native_top = top_pos + border + title_height;
@@ -3600,7 +3458,7 @@ frame_geometry (Lisp_Object frame, Lisp_Object attribute)
   tab_bar_height = FRAME_TAB_BAR_HEIGHT (f);
   tab_bar_width = (tab_bar_height
 		   ? native_width - 2 * internal_border_width : 0);
-  // inner_top += tab_bar_height;
+  /* inner_top += tab_bar_height; */
 
   /* Construct list.  */
   if (EQ (attribute, Qouter_edges))
@@ -3727,7 +3585,6 @@ The coordinates X and Y are interpreted in pixels relative to a position
   GdkSeat *seat = gdk_display_get_default_seat (gdpy);
   GdkDevice *device = gdk_seat_get_pointer (seat);
 
-  PGTK_TRACE ("pgtk-set-mouse-absolute-pixel-position:");
   gdk_device_warp (device, gscr, XFIXNUM (x), XFIXNUM (y));	/* No effect on wayland. */
 
   return Qnil;
@@ -3804,7 +3661,6 @@ visible.  */)
   (Lisp_Object frames)
 {
   Lisp_Object rest, tmp;
-  int count;
 
   if (!CONSP (frames))
     frames = list1 (frames);
@@ -3823,7 +3679,7 @@ visible.  */)
   frames = Fnreverse (tmp);
 
   /* Make sure the current matrices are up-to-date.  */
-  count = SPECPDL_INDEX ();
+  specpdl_ref count = SPECPDL_INDEX ();
   specbind (Qredisplay_dont_pause, Qt);
   redisplay_preserve_echo_area (32);
   unbind_to (count, Qnil);
@@ -3861,7 +3717,7 @@ value of DIR as in previous invocations; this is standard MS Windows behavior.  
   char *fn;
   Lisp_Object file = Qnil;
   Lisp_Object decoded_file;
-  ptrdiff_t count = SPECPDL_INDEX ();
+  specpdl_ref count = SPECPDL_INDEX ();
   char *cdef_file;
 
   check_window_system (f);
@@ -3906,7 +3762,7 @@ value of DIR as in previous invocations; this is standard MS Windows behavior.  
 }
 
 DEFUN ("pgtk-backend-display-class", Fpgtk_backend_display_class, Spgtk_backend_display_class, 0, 1, "",
-       doc: /* Returns the name of the Gdk backend display class of the TERMINAL.
+       doc: /* Return the name of the Gdk backend display class of TERMINAL.
 The optional argument TERMINAL specifies which display to ask about.
 TERMINAL should be a terminal object, a frame or a display name (a string).
 If omitted or nil, that stands for the selected frame's display.  */)
@@ -3918,11 +3774,64 @@ If omitted or nil, that stands for the selected frame's display.  */)
   return build_string (type_name);
 }
 
-/* ==========================================================================
+DEFUN ("x-select-font", Fx_select_font, Sx_select_font, 0, 2, 0,
+       doc: /* Read a font using a GTK dialog and return a font spec.
 
-    Lisp interface declaration
+FRAME is the frame on which to pop up the font chooser.  If omitted or
+nil, it defaults to the selected frame. */)
+  (Lisp_Object frame, Lisp_Object ignored)
+{
+  struct frame *f = decode_window_system_frame (frame);
+  Lisp_Object font;
+  Lisp_Object font_param;
+  char *default_name = NULL;
+  specpdl_ref count = SPECPDL_INDEX ();
 
-   ========================================================================== */
+  if (popup_activated ())
+    error ("Trying to use a menu from within a menu-entry");
+  else
+    pgtk_menu_set_in_use (true);
+
+  /* Prevent redisplay.  */
+  specbind (Qinhibit_redisplay, Qt);
+  record_unwind_protect_void (clean_up_dialog);
+
+  block_input ();
+
+  XSETFONT (font, FRAME_FONT (f));
+  font_param = Ffont_get (font, QCname);
+  if (STRINGP (font_param))
+    default_name = xlispstrdup (font_param);
+  else
+    {
+      font_param = Fframe_parameter (frame, Qfont_parameter);
+      if (STRINGP (font_param))
+        default_name = xlispstrdup (font_param);
+    }
+
+  font = xg_get_font (f, default_name);
+  xfree (default_name);
+
+  unblock_input ();
+
+  if (NILP (font))
+    quit ();
+
+  return unbind_to (count, font);
+}
+
+DEFUN ("x-gtk-debug", Fx_gtk_debug, Sx_gtk_debug, 1, 1, 0,
+       doc: /* SKIP: real doc in xfns.c.  */)
+  (Lisp_Object enable)
+{
+  gboolean enable_debug = !NILP (enable);
+
+  block_input ();
+  gtk_window_set_interactive_debugging (enable_debug);
+  unblock_input ();
+
+  return NILP (enable) ? Qnil : Qt;
+}
 
 void
 syms_of_pgtkfns (void)
@@ -3937,38 +3846,10 @@ syms_of_pgtkfns (void)
   DEFSYM (Qresize_mode, "resize-mode");
 
   DEFVAR_LISP ("x-cursor-fore-pixel", Vx_cursor_fore_pixel,
-	       doc: /* A string indicating the foreground color of the cursor box.  */);
+	       doc: /* SKIP: real doc in xfns.c.  */);
   Vx_cursor_fore_pixel = Qnil;
 
-  DEFVAR_LISP ("pgtk-icon-type-alist", Vpgtk_icon_type_alist,
-	       doc: /* Alist of elements (REGEXP . IMAGE) for images of icons associated to frames.
-If the title of a frame matches REGEXP, then IMAGE.tiff is
-selected as the image of the icon representing the frame when it's
-miniaturized.  If an element is t, then Emacs tries to select an icon
-based on the filetype of the visited file.
-
-The images have to be installed in a folder called English.lproj in the
-Emacs folder.  You have to restart Emacs after installing new icons.
-
-Example: Install an icon Gnus.tiff and execute the following code
-
-(setq pgtk-icon-type-alist
-(append pgtk-icon-type-alist
-\\='((\"^\\\\*\\\\(Group\\\\*$\\\\|Summary \\\\|Article\\\\*$\\\\)\"
-. \"Gnus\"))))
-
-When you miniaturize a Group, Summary or Article frame, Gnus.tiff will
-be used as the image of the icon representing the frame.  */);
-  Vpgtk_icon_type_alist = list1 (Qt);
-
-
-  /* Provide x-toolkit also for GTK.  Internally GTK does not use Xt so it
-     is not an X toolkit in that sense (USE_X_TOOLKIT is not defined).
-     But for a user it is a toolkit for X, and indeed, configure
-     accepts --with-x-toolkit=gtk.  */
-  Fprovide (intern_c_string ("x-toolkit"), Qnil);
   Fprovide (intern_c_string ("gtk"), Qnil);
-  Fprovide (intern_c_string ("move-toolbar"), Qnil);
 
   DEFVAR_LISP ("gtk-version-string", Vgtk_version_string,
 	       doc: /* Version info for GTK+.  */);
@@ -3995,7 +3876,6 @@ be used as the image of the icon representing the frame.  */);
     g_free (ver);
   }
 
-
   defsubr (&Spgtk_set_resource);
   defsubr (&Sxw_display_color_p);	/* this and next called directly by C code */
   defsubr (&Sx_display_grayscale_p);
@@ -4003,15 +3883,12 @@ be used as the image of the icon representing the frame.  */);
   defsubr (&Sxw_color_defined_p);
   defsubr (&Sxw_color_values);
   defsubr (&Sx_server_max_request_size);
-  defsubr (&Sx_server_vendor);
-  defsubr (&Sx_server_version);
   defsubr (&Sx_display_pixel_width);
   defsubr (&Sx_display_pixel_height);
   defsubr (&Spgtk_display_monitor_attributes_list);
   defsubr (&Spgtk_frame_geometry);
   defsubr (&Spgtk_frame_edges);
   defsubr (&Spgtk_frame_restack);
-  defsubr (&Spgtk_popup_font_panel);
   defsubr (&Spgtk_set_mouse_absolute_pixel_position);
   defsubr (&Spgtk_mouse_absolute_pixel_position);
   defsubr (&Sx_display_mm_width);
@@ -4026,9 +3903,7 @@ be used as the image of the icon representing the frame.  */);
   defsubr (&Sx_open_connection);
   defsubr (&Sx_close_connection);
   defsubr (&Sx_display_list);
-
-  defsubr (&Spgtk_hide_others);
-  defsubr (&Spgtk_hide_emacs);
+  defsubr (&Sx_gtk_debug);
 
   defsubr (&Sx_show_tip);
   defsubr (&Sx_hide_tip);
@@ -4042,10 +3917,7 @@ be used as the image of the icon representing the frame.  */);
   defsubr (&Spgtk_set_monitor_scale_factor);
 
   defsubr (&Sx_file_dialog);
-
-  as_status = 0;
-  as_script = Qnil;
-  as_result = 0;
+  defsubr (&Sx_select_font);
 
   monitor_scale_factor_alist = Qnil;
   staticpro (&monitor_scale_factor_alist);
@@ -4063,57 +3935,20 @@ be used as the image of the icon representing the frame.  */);
 
   /* This is not ifdef:ed, so other builds than GTK can customize it.  */
   DEFVAR_BOOL ("x-gtk-use-old-file-dialog", x_gtk_use_old_file_dialog,
-	       doc: /* Non-nil means prompt with the old GTK file selection dialog.
-If nil or if the file selection dialog is not available, the new GTK file
-chooser is used instead.  To turn off all file dialogs set the
-variable `use-file-dialog'.  */);
+	       doc: /* SKIP: real doc in xfns.c.  */);
   x_gtk_use_old_file_dialog = false;
 
   DEFVAR_BOOL ("x-gtk-show-hidden-files", x_gtk_show_hidden_files,
-	       doc: /* If non-nil, the GTK file chooser will by default show hidden files.
-Note that this is just the default, there is a toggle button on the file
-chooser to show or not show hidden files on a case by case basis.  */);
+	       doc: /* SKIP: real doc in xfns.c.  */);
   x_gtk_show_hidden_files = false;
 
   DEFVAR_BOOL ("x-gtk-file-dialog-help-text", x_gtk_file_dialog_help_text,
-	       doc: /* If non-nil, the GTK file chooser will show additional help text.
-If more space for files in the file chooser dialog is wanted, set this to nil
-to turn the additional text off.  */);
+	       doc: /* SKIP: real doc in xfns.c.  */);
   x_gtk_file_dialog_help_text = true;
 
-  DEFVAR_BOOL ("x-gtk-use-system-tooltips", x_gtk_use_system_tooltips,
-	       doc: /* If non-nil with a Gtk+ built Emacs, the Gtk+ tooltip is used.
-Otherwise use Emacs own tooltip implementation.
-When using Gtk+ tooltips, the tooltip face is not used.  */);
-  x_gtk_use_system_tooltips = true;
-
   DEFVAR_LISP ("x-max-tooltip-size", Vx_max_tooltip_size,
-    doc: /* Maximum size for tooltips.
-Value is a pair (COLUMNS . ROWS).  Text larger than this is clipped.  */);
-  Vx_max_tooltip_size = Fcons (make_fixnum (80), make_fixnum (40));
-
-  DEFVAR_LISP ("x-gtk-resize-child-frames", x_gtk_resize_child_frames,
-    doc: /* If non-nil, resize child frames specially with GTK builds.
-If this is nil, resize child frames like any other frames.  This is the
-default and usually works with most desktops.  Some desktop environments
-(GNOME shell in particular when using the mutter window manager),
-however, may refuse to resize a child frame when Emacs is built with
-GTK3.  For those environments, the two settings below are provided.
-
-If this equals the symbol 'hide', Emacs temporarily hides the child
-frame during resizing.  This approach seems to work reliably, may
-however induce some flicker when the frame is made visible again.
-
-If this equals the symbol 'resize-mode', Emacs uses GTK's resize mode to
-always trigger an immediate resize of the child frame.  This method is
-deprecated by GTK and may not work in future versions of that toolkit.
-It also may freeze Emacs when used with other desktop environments.  It
-avoids, however, the unpleasant flicker induced by the hiding approach.
-
-This variable is considered a temporary workaround and will be hopefully
-eliminated in future versions of Emacs.  */);
-  x_gtk_resize_child_frames = Qnil;
-
+	       doc: /* SKIP: real doc in xfns.c.  */);
+  Vx_max_tooltip_size = Qnil;
 
   DEFSYM (Qmono, "mono");
   DEFSYM (Qassq_delete_all, "assq-delete-all");
@@ -4128,67 +3963,3 @@ eliminated in future versions of Emacs.  */);
   DEFSYM (Qreverse_portrait, "reverse-portrait");
   DEFSYM (Qreverse_landscape, "reverse-landscape");
 }
-
-
-#ifdef PGTK_DEBUG
-#include <stdarg.h>
-#include <time.h>
-void
-pgtk_log (const char *file, int lineno, const char *fmt, ...)
-{
-  struct timespec ts;
-  struct tm tm;
-  char timestr[32];
-  va_list ap;
-
-  clock_gettime (CLOCK_REALTIME, &ts);
-
-  localtime_r (&ts.tv_sec, &tm);
-  strftime (timestr, sizeof timestr, "%H:%M:%S", &tm);
-
-  fprintf (stderr, "%s.%06ld %.10s:%04d ", timestr, ts.tv_nsec / 1000, file,
-	   lineno);
-  va_start (ap, fmt);
-  vfprintf (stderr, fmt, ap);
-  va_end (ap);
-  fputc ('\n', stderr);
-}
-
-void
-pgtk_backtrace (const char *file, int lineno)
-{
-  Lisp_Object bt = make_uninit_vector (10);
-  for (int i = 0; i < 10; i++)
-    ASET (bt, i, Qnil);
-
-  struct timespec ts;
-  struct tm tm;
-  char timestr[32];
-
-  clock_gettime (CLOCK_REALTIME, &ts);
-
-  localtime_r (&ts.tv_sec, &tm);
-  strftime (timestr, sizeof timestr, "%H:%M:%S", &tm);
-
-  fprintf (stderr, "%s.%06ld %.10s:%04d ********\n", timestr,
-	   ts.tv_nsec / 1000, file, lineno);
-
-  get_backtrace (bt);
-  for (int i = 0; i < 10; i++)
-    {
-      Lisp_Object stk = AREF (bt, i);
-      if (!NILP (stk))
-	{
-	  Lisp_Object args[2] = { build_string ("%S"), stk };
-	  Lisp_Object str = Fformat (2, args);
-	  fprintf (stderr, "%s %.10s:%04d %s\n", timestr, file, lineno,
-		   SSDATA (str));
-	}
-    }
-
-  fprintf (stderr, "%s %.10s:%04d ********\n", timestr, file, lineno);
-}
-
-#endif
-
-#endif

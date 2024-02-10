@@ -106,8 +106,6 @@
 ;;; Code:
 
 (require 'ediff-util)
-;; end pacifier
-
 (require 'ediff-init)
 (require 'ediff-mult)  ; required because of the registry stuff
 
@@ -282,7 +280,8 @@ deleted.
 Returns the buffer into which the file is visited.
 Also sets `ediff--magic-file-name' to indicate where the file's content
 has been saved (if not in `buffer-file-name')."
-  (let* ((file-magic (ediff-filename-magic-p file))
+  (let* ((file-magic (or (ediff-file-compressed-p file)
+                         (file-remote-p file)))
 	 (temp-file-name-prefix (file-name-nondirectory file)))
     (cond ((not (file-readable-p file))
 	   (user-error "File `%s' does not exist or is not readable" file))
@@ -910,7 +909,7 @@ MERGE-AUTOSTORE-DIR is the directory in which to store merged files."
 (defun ediff-windows-wordwise (dumb-mode &optional wind-A wind-B startup-hooks)
   "Compare WIND-A and WIND-B, which are selected by clicking, wordwise.
 This compares the portions of text visible in each of the two windows.
-With prefix argument, DUMB-MODE, or on a non-windowing display, works as
+With prefix argument, DUMB-MODE, or on a non-graphical display, works as
 follows:
 If WIND-A is nil, use selected window.
 If WIND-B is nil, use window next to WIND-A.
@@ -924,7 +923,7 @@ arguments after setting up the Ediff buffers."
 (defun ediff-windows-linewise (dumb-mode &optional wind-A wind-B startup-hooks)
   "Compare WIND-A and WIND-B, which are selected by clicking, linewise.
 This compares the portions of text visible in each of the two windows.
-With prefix argument, DUMB-MODE, or on a non-windowing display, works as
+With prefix argument, DUMB-MODE, or on a non-graphical display, works as
 follows:
 If WIND-A is nil, use selected window.
 If WIND-B is nil, use window next to WIND-A.
@@ -936,7 +935,7 @@ arguments after setting up the Ediff buffers."
 
 ;; Compare visible portions of text in WIND-A and WIND-B, which are
 ;; selected by clicking.
-;; With prefix argument, DUMB-MODE, or on a non-windowing display,
+;; With prefix argument, DUMB-MODE, or on a non-graphical display,
 ;; works as follows:
 ;; If WIND-A is nil, use selected window.
 ;; If WIND-B is nil, use window next to WIND-A.
@@ -1557,7 +1556,9 @@ With optional NODE, goes to that node."
 	  (info "ediff")
 	  (if node
 	      (Info-goto-node node)
-	    (message "Type `i' to search for a specific topic"))
+            (message (substitute-command-keys
+                      (concat "Type \\<Info-mode-map>\\[Info-index] to"
+                              " search for a specific topic"))))
 	  (raise-frame))
       (error (beep 1)
 	     (with-output-to-temp-buffer ediff-msg-buffer

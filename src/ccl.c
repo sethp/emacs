@@ -33,6 +33,12 @@ along with GNU Emacs.  If not, see <https://www.gnu.org/licenses/>.  */
 #include "charset.h"
 #include "ccl.h"
 #include "coding.h"
+#include "keyboard.h"
+
+/* Avoid GCC 12 bug <https://gcc.gnu.org/bugzilla/show_bug.cgi?id=105784>.  */
+#if GNUC_PREREQ (12, 0, 0)
+# pragma GCC diagnostic ignored "-Wanalyzer-use-of-uninitialized-value"
+#endif
 
 /* Table of registered CCL programs.  Each element is a vector of
    NAME, CCL_PROG, RESOLVEDP, and UPDATEDP, where NAME (symbol) is the
@@ -1981,7 +1987,7 @@ ccl_get_compiled_code (Lisp_Object ccl_prog, ptrdiff_t *idx)
 /* Setup fields of the structure pointed by CCL appropriately for the
    execution of CCL program CCL_PROG.  CCL_PROG is the name (symbol)
    of the CCL program or the already compiled code (vector).
-   Return true iff successful.
+   Return true if successful.
 
    If CCL_PROG is nil, just reset the structure pointed by CCL.  */
 bool

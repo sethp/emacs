@@ -155,8 +155,9 @@ enum font_property_index
     /* In a font-spec, the value is an alist of extra information of a
        font such as name, OpenType features, and language coverage.
        In addition, in a font-entity, the value may contain a pair
-       (font-entity . INFO) where INFO is extra information to identify
-       a font (font-driver dependent).  */
+       (font-entity . INFO) where INFO is extra information to
+       identify a font (font-driver dependent).  In a font-entity,
+       this holds font driver-specific information.  */
     FONT_EXTRA_INDEX,		/* alist		alist */
 
     /* This value is the length of font-spec vector.  */
@@ -219,13 +220,13 @@ enum font_property_index
 #define FONT_WIDTH_FOR_FACE(font)	\
   font_style_symbolic (font, FONT_WIDTH_INDEX, true)
 
-/* Return the numeric weight value corresponding ot the symbol NAME.  */
+/* Return the numeric weight value corresponding to the symbol NAME.  */
 #define FONT_WEIGHT_NAME_NUMERIC(name)	\
   (font_style_to_value (FONT_WEIGHT_INDEX, (name), false) >> 8)
-/* Return the numeric slant value corresponding ot the symbol NAME.  */
+/* Return the numeric slant value corresponding to the symbol NAME.  */
 #define FONT_SLANT_NAME_NUMERIC(name)	\
   (font_style_to_value (FONT_SLANT_INDEX, (name), false) >> 8)
-/* Return the numeric width value corresponding ot the symbol NAME.  */
+/* Return the numeric width value corresponding to the symbol NAME.  */
 #define FONT_WIDTH_NAME_NUMERIC(name)	\
   (font_style_to_value (FONT_WIDTH_INDEX, (name), false) >> 8)
 
@@ -297,10 +298,16 @@ struct font
      SPACE glyph, the value is 0.  */
   int space_width;
 
-  /* Average width of glyphs in the font.  If the font itself doesn't
-     have that information, but has glyphs of ASCII characters, the
-     value is the average width of those glyphs.  Otherwise, the value
-     is 0.  */
+  /* Average width of glyphs in the font.  Should be the average width
+     of the glyphs of ASCII characters.  The value for the default
+     face's font is used to determine the canonical character width of
+     the frame (see FRAME_COLUMN_WIDTH).  For fonts that are not
+     fixed-pitch, the font backend should actually calculate the value
+     from the glyphs of ASCII characters in the range 32..126
+     inclusively; relying on the average-width attribute recorded in
+     the font is unreliable in this case, especially in fonts that
+     support CJK scripts, where many characters are wide.  Value can
+     be zero if the font doesn't have glyphs for ASCII characters.  */
   int average_width;
 
   /* Ascent and descent of the font (in pixels).  */
@@ -823,7 +830,7 @@ extern Lisp_Object merge_font_spec (Lisp_Object, Lisp_Object);
 
 extern Lisp_Object font_make_entity (void);
 extern Lisp_Object font_make_object (int, Lisp_Object, int);
-#if defined (HAVE_XFT) || defined (HAVE_FREETYPE) || defined (HAVE_NS) || defined(HAVE_PGTK)
+#if defined (HAVE_XFT) || defined (HAVE_FREETYPE) || defined (HAVE_NS)
 extern Lisp_Object font_build_object (int, Lisp_Object, Lisp_Object, double);
 #endif
 
@@ -965,7 +972,7 @@ extern struct font_driver const nsfont_driver;
 extern void syms_of_nsfont (void);
 extern void syms_of_macfont (void);
 #endif	/* HAVE_NS */
-#ifdef USE_CAIRO
+#if defined (USE_CAIRO) || defined (USE_BE_CAIRO)
 extern struct font_driver const ftcrfont_driver;
 #ifdef HAVE_HARFBUZZ
 extern struct font_driver ftcrhbfont_driver;
@@ -999,7 +1006,7 @@ extern void font_deferred_log (const char *, Lisp_Object, Lisp_Object);
 INLINE bool
 font_data_structures_may_be_ill_formed (void)
 {
-#ifdef USE_CAIRO
+#if defined USE_CAIRO || defined USE_BE_CAIRO
   /* Although this works around Bug#20890, it is probably not the
      right thing to do.  */
   return gc_in_progress;

@@ -178,12 +178,16 @@ usage: (characterp OBJECT)  */
   return (CHARACTERP (object) ? Qt : Qnil);
 }
 
-DEFUN ("max-char", Fmax_char, Smax_char, 0, 0, 0,
-       doc: /* Return the character of the maximum code.  */
+DEFUN ("max-char", Fmax_char, Smax_char, 0, 1, 0,
+       doc: /* Return the maximum character code.
+If UNICODE is non-nil, return the maximum character code defined
+by the Unicode Standard.  */
        attributes: const)
-  (void)
+  (Lisp_Object unicode)
 {
-  return make_fixnum (MAX_CHAR);
+  return (!NILP (unicode)
+	  ? make_fixnum (MAX_UNICODE_CHAR)
+	  : make_fixnum (MAX_CHAR));
 }
 
 DEFUN ("unibyte-char-to-multibyte", Funibyte_char_to_multibyte,
@@ -256,8 +260,12 @@ char_width (int c, struct Lisp_Char_Table *dp)
 
 
 DEFUN ("char-width", Fchar_width, Schar_width, 1, 1, 0,
-       doc: /* Return width of CHAR when displayed in the current buffer.
-The width is measured by how many columns it occupies on the screen.
+       doc: /* Return width of CHAR in columns when displayed in the current buffer.
+The width of CHAR is measured by how many columns it will occupy on the screen.
+This is based on data in `char-width-table', and ignores the actual
+metrics of the character's glyph as determined by its font.
+If the display table in effect replaces CHAR on display with
+something else, the function returns the width of the replacement.
 Tab is taken to occupy `tab-width' columns.
 usage: (char-width CHAR)  */)
   (Lisp_Object ch)
@@ -453,20 +461,26 @@ lisp_string_width (Lisp_Object string, ptrdiff_t from, ptrdiff_t to,
 }
 
 DEFUN ("string-width", Fstring_width, Sstring_width, 1, 3, 0,
-       doc: /* Return width of STRING when displayed in the current buffer.
-Width is measured by how many columns it occupies on the screen.
+       doc: /* Return width of STRING in columns when displayed in the current buffer.
+Width of STRING is measured by how many columns it will occupy on the screen.
+
 Optional arguments FROM and TO specify the substring of STRING to
 consider, and are interpreted as in `substring'.
 
-When calculating width of a multibyte character in STRING,
-only the base leading-code is considered; the validity of
-the following bytes is not checked.  Tabs in STRING are always
-taken to occupy `tab-width' columns.  The effect of faces and fonts
-used for non-Latin and other unusual characters (such as emoji) is
-ignored as well, as are display properties and invisible text.
-For these reasons, the results are not generally reliable;
-for accurate dimensions of text as it will be displayed,
-use `window-text-pixel-size' instead.
+Width of each character in STRING is generally taken according to
+`char-width', but character compositions and the display table in
+effect are taken into consideration.
+Tabs in STRING are always assumed to occupy `tab-width' columns,
+although they might take fewer columns depending on the column where
+they begin on display.
+The effect of faces and fonts, including fonts used for non-Latin and
+other unusual characters, such as emoji, is ignored, as are display
+properties and invisible text.
+
+For these reasons, the results are just an approximation, especially
+on GUI frames; for accurate dimensions of text as it will be
+displayed, use `string-pixel-width' or `window-text-pixel-size'
+instead.
 usage: (string-width STRING &optional FROM TO)  */)
   (Lisp_Object str, Lisp_Object from, Lisp_Object to)
 {
@@ -654,48 +668,38 @@ str_as_multibyte (unsigned char *str, ptrdiff_t len, ptrdiff_t nbytes,
 ptrdiff_t
 count_size_as_multibyte (const unsigned char *str, ptrdiff_t len)
 {
-  const unsigned char *endp = str + len;
+  /* Count the number of non-ASCII (raw) bytes, since they will occupy
+     two bytes in a multibyte string.  */
+  ptrdiff_t nonascii = 0;
+  for (ptrdiff_t i = 0; i < len; i++)
+    nonascii += str[i] >> 7;
   ptrdiff_t bytes;
-
-  for (bytes = 0; str < endp; str++)
-    {
-      int n = *str < 0x80 ? 1 : 2;
-      if (INT_ADD_WRAPV (bytes, n, &bytes))
-        string_overflow ();
-    }
+  if (INT_ADD_WRAPV (len, nonascii, &bytes))
+    string_overflow ();
   return bytes;
 }
 
 
-/* Convert unibyte text at STR of BYTES bytes to a multibyte text
-   that contains the same single-byte characters.  It actually
-   converts all 8-bit characters to multibyte forms.  It is assured
-   that we can use LEN bytes at STR as a work area and that is
-   enough.  */
-
+/* Convert unibyte text at SRC of NCHARS chars to a multibyte text
+   at DST, that contains the same single-byte characters.
+   Return the number of bytes written at DST.  */
 ptrdiff_t
-str_to_multibyte (unsigned char *str, ptrdiff_t len, ptrdiff_t bytes)
+str_to_multibyte (unsigned char *dst, const unsigned char *src,
+		  ptrdiff_t nchars)
 {
-  unsigned char *p = str, *endp = str + bytes;
-  unsigned char *to;
-
-  while (p < endp && *p < 0x80) p++;
-  if (p == endp)
-    return bytes;
-  to = p;
-  bytes = endp - p;
-  endp = str + len;
-  memmove (endp - bytes, p, bytes);
-  p = endp - bytes;
-  while (p < endp)
+  unsigned char *d = dst;
+  for (ptrdiff_t i = 0; i < nchars; i++)
     {
-      int c = *p++;
-
-      if (c >= 0x80)
-	c = BYTE8_TO_CHAR (c);
-      to += CHAR_STRING (c, to);
+      unsigned char c = src[i];
+      if (c <= 0x7f)
+	*d++ = c;
+      else
+	{
+	  *d++ = 0xc0 + ((c >> 6) & 1);
+	  *d++ = 0x80 + (c & 0x3f);
+	}
     }
-  return (to - str);
+  return d - dst;
 }
 
 /* Arrange multibyte text at STR of LEN bytes as a unibyte text.  It
@@ -734,31 +738,6 @@ str_as_unibyte (unsigned char *str, ptrdiff_t bytes)
     }
   return (to - str);
 }
-
-/* Convert eight-bit chars in SRC (in multibyte form) to the
-   corresponding byte and store in DST.  CHARS is the number of
-   characters in SRC.  The value is the number of bytes stored in DST.
-   Usually, the value is the same as CHARS, but is less than it if SRC
-   contains a non-ASCII, non-eight-bit character.  */
-
-ptrdiff_t
-str_to_unibyte (const unsigned char *src, unsigned char *dst, ptrdiff_t chars)
-{
-  ptrdiff_t i;
-
-  for (i = 0; i < chars; i++)
-    {
-      int c = string_char_advance (&src);
-
-      if (CHAR_BYTE8_P (c))
-	c = CHAR_TO_BYTE8 (c);
-      else if (! ASCII_CHAR_P (c))
-	return i;
-      *dst++ = c;
-    }
-  return i;
-}
-
 
 static ptrdiff_t
 string_count_byte8 (Lisp_Object string)

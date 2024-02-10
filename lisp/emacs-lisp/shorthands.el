@@ -4,6 +4,7 @@
 
 ;; Author: João Távora <joaotavora@gmail.com>
 ;; Keywords: lisp
+;; Package: emacs
 
 ;; This file is part of GNU Emacs.
 
@@ -61,8 +62,7 @@
 (defun shorthands-font-lock-shorthands (limit)
   (when read-symbol-shorthands
     (while (re-search-forward
-            (eval-when-compile
-              (concat "\\_<\\(" lisp-mode-symbol-regexp "\\)\\_>"))
+            (concat "\\_<\\(" (rx lisp-mode-symbol) "\\)\\_>")
             limit t)
       (let* ((existing (get-text-property (match-beginning 1) 'face))
              (probe (and (not (memq existing '(font-lock-comment-face

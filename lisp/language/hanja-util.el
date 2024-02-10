@@ -6437,7 +6437,7 @@ character.  This variable is initialized by `hanja-init-load'.")
     (message "")))
 
 ;; List of current conversion status.
-;; The first element is the strating position of shown list.
+;; The first element is the starting position of shown list.
 ;; It is a group number each split by `hanja-list-width'.
 ;; The second element is the position of selected element.
 ;; The third element is a list of suitable Hanja candidate.
@@ -6573,8 +6573,8 @@ The value is a hanja character that is selected interactively."
            (hanja-filter (lambda (x) (car x))
                          (mapcar (lambda (c)
                                    (if (listp c)
-                                       (cons (decode-char 'ucs (car c)) (cdr c))
-				     (list (decode-char 'ucs c))))
+                                       (cons (car c) (cdr c))
+                                     (list c)))
                                  (aref hanja-table char)))))
     (unwind-protect
 	(when (aref hanja-conversions 2)

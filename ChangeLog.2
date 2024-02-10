@@ -111,7 +111,7 @@
 
 2017-03-21  Noam Postavsky  <npostavs@gmail.com>
 
-	Narrow scope of modification hook renabling in org-src fontification
+	Narrow scope of modification hook re-enabling in org-src fontification
 
 	Modification hooks should be enabled while modifying text in the
 	org-src temp buffer, but in 2017-01-29 "Call modification hooks in
@@ -8956,10 +8956,10 @@
 
 2016-02-04  Carlos Pita  <carlosjosepita@gmail.com>  (tiny change)
 
-	Make complection in erc use consistent casing
+	Make completion in erc use consistent casing
 
 	* lisp/erc/erc-pcomplete.el (pcomplete-erc-all-nicks): Make
-	case in the complection consistent (bug#18509).
+	case in the completion consistent (bug#18509).
 
 2016-02-04  Francis Litterio  <flitterio@gmail.com>
 
@@ -9317,7 +9317,7 @@
 	optional.
 
 	* src/buffer.c (Fbarf_if_buffer_read_only): Rename argument POS
-	to POSITION to keep consisteny with doc-string.
+	to POSITION to keep consistent with doc-string.
 
 2016-02-01  Paul Eggert  <eggert@cs.ucla.edu>
 
@@ -10661,8 +10661,8 @@
 
 	* lisp/gnus/nnir.el (nnir-request-update-mark):
 	Default to the original mark.
-	cf. <http://thread.gmane.org/gmane.emacs.gnus.general/86583>
-	and <http://thread.gmane.org/gmane.emacs.gnus.general/86640>
+	cf. <http://thread.gmane.org/gmane.emacs.gnus.general/86583> [dead link]
+	and <http://thread.gmane.org/gmane.emacs.gnus.general/86640> [dead link]
 
 2016-01-19  Glenn Morris  <rgm@gnu.org>
 
@@ -11843,7 +11843,7 @@
 
 2016-01-05  Alan Mackenzie  <acm@muc.de>
 
-	Make C++ buffers writeable when writing their initial text properties.
+	Make C++ buffers writable when writing their initial text properties.
 
 	This is a correction to yesterday's CC Mode patch.
 
@@ -12012,7 +12012,7 @@
 	(Maybe this is the last merge from Gnus git to Emacs git)
 
 	Cf. discussion on ding mailing list, messages in
-	<http://thread.gmane.org/gmane.emacs.gnus.general/86228>.
+	<http://thread.gmane.org/gmane.emacs.gnus.general/86228>. [dead link]
 	Common code from the three files mml-smime.el, mml1991.el, and
 	mml2015.el is moved to mml-sec.el.  Auxiliary functions are added
 	to gnus-util.el.
@@ -15206,8 +15206,9 @@
 	Remove nnml-retrieve-groups that is unnecessary and somewhat problematic
 
 	* lisp/gnus/nnml.el (nnml-retrieve-groups): Remove.  See:
-	<http://thread.gmane.org/gmane.emacs.gnus.general/86308> and
-	<http://thread.gmane.org/gmane.emacs.gnus.general/86321>
+	<http://thread.gmane.org/gmane.emacs.gnus.general/86308> [dead link]
+	and
+	<http://thread.gmane.org/gmane.emacs.gnus.general/86321> [dead link]
 
 2015-11-25  Paul Eggert  <eggert@cs.ucla.edu>
 
@@ -17093,11 +17094,11 @@
 	* lisp/json.el (json-encoding-object-sort-predicate): New variable
 	for specifying a sorting predicate for JSON objects during encoding.
 	(json--plist-to-alist): New utility function.
-	(json-encode-hash-table): Re-use `json-encode-alist' when object keys
+	(json-encode-hash-table): Reuse `json-encode-alist' when object keys
 	are to be sorted.
 	(json-encode-alist): Sort output by
 	`json-encoding-object-sort-predicate, when set.
-	(json-encode-plist): Re-use `json-encode-alist' when object keys are
+	(json-encode-plist): Reuse `json-encode-alist' when object keys are
 	to be sorted.
 	(json-pretty-print-buffer-ordered): New command to pretty print the
 	buffer with object keys sorted alphabetically.
@@ -19541,7 +19542,7 @@
 	calling low-level functions.
 
 	* test/automated/file-notify-tests.el (file-notify--test-timeout):
-	Decrase to 6 seconds for remote directories.
+	Decrease to 6 seconds for remote directories.
 	(file-notify-test02-events): Expect different number of
 	`attribute-changed' events for the local and remote cases.  Apply
 	short delays between the operations, in order to receive all
@@ -23054,8 +23055,8 @@
 
 	Fix tests in file-notify-tests.el
 	* test/automated/file-notify-tests.el: Remove Tramp declarations.
-	(file-notify-test00-availability): Print remote command w/o Tramp
-	internal functions.
+	(file-notify-test00-availability): Print remote command without
+	Tramp internal functions.
 	(file-notify-test02-events, file-notify-test02-events-remote):
 	Adapt docstring.
 	(file-notify-test03-autorevert): Use `format-message' when
@@ -26343,7 +26344,7 @@
 	(verilog-type-font-keywords): Cycle delay operators like ##1 and
 	##[0:$] are now highlighted in their entirety similarly to the #
 	delay-control operator.  Likewise, the followed-by operators #-#
-	and #=# are no longer partially highlighed.
+	and #=# are no longer partially highlighted.
 	(verilog-backward-syntactic-ws-quick)
 	(verilog-skip-backward-comments): Minor performance improvements
 	to buffer traversal functions for reduced latency.
@@ -28676,7 +28677,7 @@
 	* lisp/faces.el (set-face-attribute): Don't be fooled too easily
 	by a hyphen in a font's name.
 
-	Fix value of posn-at-pont in R2L lines
+	Fix value of posn-at-point in R2L lines
 	* src/keyboard.c (Fposn_at_x_y, Fposn_at_point): Allow X pixel
 	coordinate of -1, for a newline in a right-to-left line that
 	overflowed into the left fringe.
@@ -30968,7 +30969,7 @@
 2015-05-28  Katsumi Yamaoka  <yamaoka@jpl.org>
 
 	* lisp/gnus/gnus-art.el (gnus-button-alist): Re-revert last change.
-	cf. <http://news.gmane.org/group/gmane.emacs.devel/thread=186896>
+	cf. <http://news.gmane.org/group/gmane.emacs.devel/thread=186896> [dead link]
 
 2015-05-28  Samer Masterson  <samer@samertm.com>
 
@@ -32623,7 +32624,7 @@
 	(verilog-set-auto-endcomments): Fix end comments for functions of
 	type void, etc.  Reported by Alex Reed.
 	(verilog-do-indent): Fix electric tab deleting form-feeds.  Note
-	caused by indent-line-to deleting tabls pre 24.5.
+	caused by indent-line-to deleting tables pre 24.5.
 	(verilog-nameable-item-re): Fix nameable items that can have an
 	end-identifier to include endchecker, endgroup, endprogram,
 	endproperty, and endsequence.  Reported by Alex Reed.
@@ -34464,7 +34465,7 @@
 
 	* lisp/emacs-lisp/package.el: Make archive and status pseudo-keywords
 	(package--has-keyword-p): Understand "arc:xxxx" and "status:xxxx"
-	as special keywords which match agains package archive and status
+	as special keywords which match against package archive and status
 	respectively.
 	* etc/NEWS: Document it.
 

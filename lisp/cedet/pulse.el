@@ -47,7 +47,7 @@
 ;; The original pulse code was written for semantic tag highlighting.
 ;; It has been extracted, and adapted for general purpose pulsing.
 ;;
-;; Pulse is a part of CEDET.  http://cedet.sf.net
+;; Pulse is a part of CEDET.  https://cedet.sourceforge.net
 
 (require 'color)
 
@@ -71,7 +71,9 @@ Any other value means to do the default pulsing behavior.
 If `pulse-flag' is non-nil, but `pulse-available-p' is nil, then
 this flag is ignored."
   :group 'pulse
-  :type 'boolean)
+  :type '(choice (const :tag "Highlight with unchanging color" nil)
+                 (const :tag "No highlight" never)
+                 (other :tag "Pulse" t)))
 
 (defface pulse-highlight-start-face
   '((((class color) (background dark))
@@ -202,12 +204,8 @@ If POINT is nil or missing, the current point is used instead.
 Optional argument FACE specifies the face to do the highlighting."
   (save-excursion
     (goto-char (or point (point)))
-    (let ((start (point-at-bol))
-          (end (save-excursion
-                 (end-of-line)
-                 (when (not (eobp))
-                   (forward-char 1))
-                 (point))))
+    (let ((start (progn (vertical-motion 0) (point)))
+          (end (progn (vertical-motion 1) (point))))
       (pulse-momentary-highlight-region start end face))))
 
 ;;;###autoload

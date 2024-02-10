@@ -47,6 +47,17 @@
 Each element looks like (FILENAME . POSITION);
 visiting file FILENAME goes automatically to position POSITION
 rather than the beginning of the buffer.
+A list element can also have the form
+
+   (DIRECTORY (dired-filename . FILENAME))
+
+where DIRECTORY is the name of a directory ending in a slash,
+and FILENAME is the name of a file in that directory.  This
+format is used for saving places in Dired buffers, see the
+function `save-place-dired-hook'; the FILENAME is the file
+where point was located in the Dired listing of DIRECTORY
+when the place in that buffer was recorded.
+
 This alist is saved between Emacs sessions.")
 
 (defcustom save-place-file (locate-user-emacs-file "places" ".emacs-places")
@@ -117,12 +128,13 @@ removable and network volumes."
 
 (defcustom save-place-ignore-files-regexp
   "\\(?:COMMIT_EDITMSG\\|hg-editor-[[:alnum:]]+\\.txt\\|svn-commit\\.tmp\\|bzr_log\\.[[:alnum:]]+\\)$"
-  "Regexp matching files for which no position should be recorded.
-Useful for temporary file such as commit message files that are
-automatically created by the VCS.  If set to nil, this feature is
-disabled, i.e., the position is recorded for all files."
+  "Regexp matching files whose positions should not be recorded.
+Useful to exclude temporary files, such as commit message files that are
+automatically created by VCSes.  If set to nil, this feature is
+disabled, i.e., no files are excluded."
   :version "24.1"
-  :type 'regexp)
+  :type '(choice (const :tag "Don't exclude any files" nil)
+                 regexp))
 
 (declare-function dired-current-directory "dired" (&optional localp))
 
@@ -191,7 +203,7 @@ file names."
   ;; First check to make sure alist has been loaded in from the master
   ;; file.  If not, do so, then feel free to modify the alist.  It
   ;; will be saved again when Emacs is killed.
-  (or save-place-loaded (load-save-place-alist-from-file))
+  (or save-place-loaded (save-place-load-alist-from-file))
   (let* ((directory (and (derived-mode-p 'dired-mode)
                          (boundp 'dired-subdir-alist)
 			 dired-subdir-alist
@@ -278,7 +290,7 @@ may have changed) back to `save-place-alist'."
 	  (file-error (message "Saving places: can't write %s" file)))
         (kill-buffer (current-buffer))))))
 
-(defun load-save-place-alist-from-file ()
+(defun save-place-load-alist-from-file ()
   (if (not save-place-loaded)
       (progn
         (setq save-place-loaded t)
@@ -290,7 +302,11 @@ may have changed) back to `save-place-alist'."
               ;; adding hooks to it.
               (with-current-buffer (get-buffer-create " *Saved Places*")
                 (delete-region (point-min) (point-max))
-                (insert-file-contents file)
+                ;; Make sure our 'coding:' cookie in the save-place
+                ;; file will take effect, in case the caller binds
+                ;; coding-system-for-read.
+                (let (coding-system-for-read)
+                  (insert-file-contents file))
                 (goto-char (point-min))
                 (setq save-place-alist
                       (with-demoted-errors "Error reading save-place-file: %S"
@@ -328,15 +344,27 @@ may have changed) back to `save-place-alist'."
       (with-current-buffer (car buf-list)
 	;; save-place checks buffer-file-name too, but we can avoid
 	;; overhead of function call by checking here too.
-	(and (or buffer-file-name (and (derived-mode-p 'dired-mode)
-                                       (boundp 'dired-subdir-alist)
-				       dired-subdir-alist
-				       (dired-current-directory)))
-	     (save-place-to-alist))
+	(when (and (or buffer-file-name
+                       (and (derived-mode-p 'dired-mode)
+                            (boundp 'dired-subdir-alist)
+		            dired-subdir-alist
+		            (dired-current-directory)))
+                   ;; Don't save place in literally-visited file
+                   ;; because this will commonly differ from the place
+                   ;; when visiting literally (and
+                   ;; `find-file-literally' always places point at the
+                   ;; start of the buffer).
+                   (not find-file-literally))
+	  (save-place-to-alist))
 	(setq buf-list (cdr buf-list))))))
 
+(defvar save-place-after-find-file-hook nil
+  "Hook run at the end of `save-place-find-file-hook'.")
+
 (defun save-place-find-file-hook ()
-  (or save-place-loaded (load-save-place-alist-from-file))
+  "Function added to `find-file-hook' by `save-place-mode'.
+It runs the hook `save-place-after-find-file-hook'."
+  (or save-place-loaded (save-place-load-alist-from-file))
   (let ((cell (assoc buffer-file-name save-place-alist)))
     (if cell
 	(progn
@@ -344,13 +372,15 @@ may have changed) back to `save-place-alist'."
 	      (and (integerp (cdr cell))
 		   (goto-char (cdr cell))))
           ;; and make sure it will be saved again for later
-          (setq save-place-mode t)))))
+          (setq save-place-mode t))))
+  (run-hooks 'save-place-after-find-file-hook))
 
 (declare-function dired-goto-file "dired" (file))
 
 (defun save-place-dired-hook ()
-  "Position the point in a Dired buffer."
-  (or save-place-loaded (load-save-place-alist-from-file))
+  "Position point in a Dired buffer according to its saved place.
+This is run via `dired-initial-position-hook', which see."
+  (or save-place-loaded (save-place-load-alist-from-file))
   (let* ((directory (and (derived-mode-p 'dired-mode)
                          (boundp 'dired-subdir-alist)
 			 dired-subdir-alist
@@ -378,6 +408,9 @@ may have changed) back to `save-place-alist'."
   ;; (including just now).
   (if save-place-loaded
       (save-place-alist-to-file)))
+
+(define-obsolete-function-alias 'load-save-place-alist-from-file
+  #'save-place-load-alist-from-file "29.1")
 
 (provide 'saveplace)
 ;;; saveplace.el ends here

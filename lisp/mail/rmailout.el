@@ -107,9 +107,8 @@ error: %S\n"
 	 (read-file
 	  (expand-file-name
 	   (read-file-name
-	    (concat "Output message to mail file (default "
-		    (file-name-nondirectory default-file)
-		    "): ")
+            (format-prompt "Output message to mail file"
+                           (file-name-nondirectory default-file))
 	    (file-name-directory default-file)
 	    (abbreviate-file-name default-file))
 	   (file-name-directory default-file))))
@@ -455,7 +454,7 @@ display message number MSG."
       (narrow-to-region (point-max) (point-max)))
     (insert-buffer-substring tembuf)
     (rmail-count-new-messages t)
-    ;; FIXME should re-use existing windows.
+    ;; FIXME should reuse existing windows.
     (if (rmail-summary-exists)
 	(rmail-select-summary (rmail-update-summary)))
     (rmail-show-message-1 msg)))

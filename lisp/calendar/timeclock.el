@@ -86,7 +86,7 @@
 
 (defcustom timeclock-workday (* 8 60 60)
   "The length of a work period in seconds."
-  :type 'integer)
+  :type 'natnum)
 
 (defvar timeclock--previous-workday nil)
 
@@ -100,19 +100,21 @@ into account any discrepancy of time under-worked or over-worked on
 previous days.  This only affects the timeclock mode line display."
   :type 'boolean)
 
-(defcustom timeclock-get-project-function 'timeclock-ask-for-project
+(defcustom timeclock-get-project-function #'timeclock-ask-for-project
   "The function used to determine the name of the current project.
 When clocking in, and no project is specified, this function will be
 called to determine what is the current project to be worked on.
 If this variable is nil, no questions will be asked."
-  :type 'function)
+  :type '(choice (const :tag "Don't ask" nil)
+                 function))
 
-(defcustom timeclock-get-reason-function 'timeclock-ask-for-reason
+(defcustom timeclock-get-reason-function #'timeclock-ask-for-reason
   "A function used to determine the reason for clocking out.
 When clocking out, and no reason is specified, this function will be
 called to determine what is the reason.
 If this variable is nil, no questions will be asked."
-  :type 'function)
+  :type '(choice (const :tag "Don't ask" nil)
+                 function))
 
 (defcustom timeclock-get-workday-function nil
   "A function used to determine the length of today's workday.
@@ -136,9 +138,6 @@ This variable only has effect if set with \\[customize]."
 
 (defvar timeclock-update-timer nil
   "The timer used to update `timeclock-mode-string'.")
-
-(define-obsolete-variable-alias 'timeclock-modeline-display
-  'timeclock-mode-line-display "24.3")
 
 ;; For byte-compiler.
 (defvar display-time-hook)
@@ -258,9 +257,6 @@ The time is bracketed by <> if you are clocked in, otherwise by [].")
   "The date of the last day when notified \"day over\" for.")
 
 ;;; User Functions:
-
-(define-obsolete-function-alias 'timeclock-modeline-display
-  'timeclock-mode-line-display "24.3")
 
 ;;;###autoload
 (define-minor-mode timeclock-mode-line-display
@@ -611,9 +607,6 @@ arguments of `completing-read'."
 (defun timeclock-ask-for-reason ()
   "Ask the user for the reason they are clocking out."
   (completing-read "Reason for clocking out: " timeclock-reason-list))
-
-(define-obsolete-function-alias 'timeclock-update-modeline
-  'timeclock-update-mode-line "24.3")
 
 (defun timeclock-update-mode-line ()
   "Update the `timeclock-mode-string' displayed in the mode line.
@@ -1247,7 +1240,7 @@ HTML-P is non-nil, HTML markup is added."
 	       (time-out (vector (list t) (list t) (list t) (list t) (list t)))
 	       (breaks   (vector (list t) (list t) (list t) (list t) (list t)))
 	       (workday  (vector (list t) (list t) (list t) (list t) (list t)))
-	       (lengths  (vector '(0 0) thirty-days-ago three-months-ago
+	       (lengths  (vector 0 thirty-days-ago three-months-ago
 				 six-months-ago one-year-ago)))
 	  ;; collect statistics from complete timelog
 	  (dolist (day day-list)

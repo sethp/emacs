@@ -23,7 +23,7 @@
 ;;; Commentary:
 
 ;; This package provides an implementation of the Desktop Notifications
-;; <https://developer.gnome.org/notification-spec/>.
+;; <https://specifications.freedesktop.org/notification-spec/latest/>.
 
 ;; In order to activate this package, you must add the following code
 ;; into your .emacs:
@@ -202,7 +202,7 @@ This function returns a notification id, an integer, which can be
 used to manipulate the notification item with
 `notifications-close-notification' or the `:replaces-id' argument
 of another `notifications-notify' call."
-  (with-demoted-errors
+  (with-demoted-errors "Notification error: %S"
     (let ((bus (or (plist-get params :bus) :session))
 	  (title (plist-get params :title))
 	  (body (plist-get params :body))

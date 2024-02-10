@@ -102,6 +102,10 @@ struct frame
   Lisp_Object parent_frame;
 #endif /* HAVE_WINDOW_SYSTEM */
 
+  /* Last device to move over this frame.  Any value that isn't a
+     string means the "Virtual core pointer".  */
+  Lisp_Object last_mouse_device;
+
   /* The frame which should receive keystrokes that occur in this
      frame, or nil if they should go to the frame itself.  This is
      usually nil, but if the frame is minibufferless, we can use this
@@ -587,6 +591,7 @@ struct frame
     struct w32_output *w32;     /* From w32term.h.  */
     struct ns_output *ns;       /* From nsterm.h.  */
     struct pgtk_output *pgtk; /* From pgtkterm.h. */
+    struct haiku_output *haiku; /* From haikuterm.h. */
   }
   output_data;
 
@@ -636,6 +641,9 @@ struct frame
      alpha[1]: alpha transparency of inactive frames
      Negative values mean not to change alpha.  */
   double alpha[2];
+
+  /* Background opacity */
+  double alpha_background;
 
   /* Exponent for gamma correction of colors.  1/(VIEWING_GAMMA *
      SCREEN_GAMMA) where viewing_gamma is 0.4545 and SCREEN_GAMMA is a
@@ -859,6 +867,11 @@ default_pixels_per_inch_y (void)
 #else
 #define FRAME_PGTK_P(f) ((f)->output_method == output_pgtk)
 #endif
+#ifndef HAVE_HAIKU
+#define FRAME_HAIKU_P(f) false
+#else
+#define FRAME_HAIKU_P(f) ((f)->output_method == output_haiku)
+#endif
 
 /* FRAME_WINDOW_P tests whether the frame is a graphical window system
    frame.  */
@@ -873,6 +886,9 @@ default_pixels_per_inch_y (void)
 #endif
 #ifdef HAVE_PGTK
 #define FRAME_WINDOW_P(f) FRAME_PGTK_P(f)
+#endif
+#ifdef HAVE_HAIKU
+#define FRAME_WINDOW_P(f) FRAME_HAIKU_P (f)
 #endif
 #ifndef FRAME_WINDOW_P
 #define FRAME_WINDOW_P(f) ((void) (f), false)
@@ -1277,8 +1293,28 @@ SET_FRAME_VISIBLE (struct frame *f, int v)
 }
 
 /* Set iconified status of frame F.  */
-#define SET_FRAME_ICONIFIED(f, i)				\
-  (f)->iconified = (eassert (0 <= (i) && (i) <= 1), (i))
+INLINE void
+SET_FRAME_ICONIFIED (struct frame *f, int i)
+{
+#ifdef HAVE_WINDOW_SYSTEM
+  Lisp_Object frame;
+#endif
+
+  eassert (0 <= (i) && (i) <= 1);
+
+  f->iconified = i;
+
+#ifdef HAVE_WINDOW_SYSTEM
+  /* Iconifying a frame might cause the frame title to change if no
+     title was explicitly specified.  Force the frame title to be
+     recomputed.  */
+
+  XSETFRAME (frame, f);
+
+  if (FRAME_WINDOW_P (f))
+    gui_consider_frame_title (frame);
+#endif
+}
 
 extern Lisp_Object selected_frame;
 extern Lisp_Object old_selected_frame;
@@ -1327,8 +1363,6 @@ extern bool frame_inhibit_resize (struct frame *, bool, Lisp_Object);
 extern void adjust_frame_size (struct frame *, int, int, int, bool,
 			       Lisp_Object);
 extern Lisp_Object mouse_position (bool);
-extern int frame_windows_min_size (Lisp_Object, Lisp_Object, Lisp_Object,
-				   Lisp_Object);
 extern void frame_size_history_plain (struct frame *, Lisp_Object);
 extern void frame_size_history_extra (struct frame *, Lisp_Object,
 				      int, int, int, int, int, int);
@@ -1636,6 +1670,7 @@ IMAGE_OPT_FROM_ID (struct frame *f, int id)
 /* The class of this X application.  */
 #define EMACS_CLASS "Emacs"
 
+extern void gui_set_frame_parameters_1 (struct frame *, Lisp_Object, bool);
 extern void gui_set_frame_parameters (struct frame *, Lisp_Object);
 extern void gui_set_fullscreen (struct frame *, Lisp_Object, Lisp_Object);
 extern void gui_set_line_spacing (struct frame *, Lisp_Object, Lisp_Object);
@@ -1661,6 +1696,7 @@ extern void gui_set_scroll_bar_height (struct frame *, Lisp_Object, Lisp_Object)
 extern long gui_figure_window_size (struct frame *, Lisp_Object, bool, bool);
 
 extern void gui_set_alpha (struct frame *, Lisp_Object, Lisp_Object);
+extern void gui_set_alpha_background (struct frame *, Lisp_Object, Lisp_Object);
 extern void gui_set_no_special_glyphs (struct frame *, Lisp_Object, Lisp_Object);
 
 extern void validate_x_resource_name (void);
@@ -1685,7 +1721,7 @@ extern const char *x_get_resource_string (const char *, const char *);
 extern void x_sync (struct frame *);
 #endif /* HAVE_X_WINDOWS */
 
-#if !defined(HAVE_NS) && !defined(HAVE_PGTK)
+#if !defined (HAVE_NS) && !defined (HAVE_PGTK)
 
 /* Set F's bitmap icon, if specified among F's parameters.  */
 

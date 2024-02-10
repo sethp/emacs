@@ -917,7 +917,7 @@
 
 	* desktop.el (desktop-buffer-info): Write docstring.
 	(desktop-buffer-info): Use `pushnew' instead of `add-to-list' and
-	unquote lamda.
+	unquote lambda.
 
 	* emacs-lisp/package.el (package-refresh-contents): Update doc.
 
@@ -4339,7 +4339,7 @@
 	(verilog-beg-of-statement-1, verilog-at-constraint-p):
 	Fix hanging with many curly-bracket pairs, bug663.
 	(verilog-do-indent): Fix electric tab deleting form-feeds.
-	Note caused by indent-line-to deleting tabls pre 24.5.
+	Note caused by indent-line-to deleting tables pre 24.5.
 	(verilog-auto-output, verilog-auto-input, verilog-auto-inout)
 	(verilog-auto-inout-module, verilog-auto-inout-in): Doc fixes.
 	(verilog-read-always-signals, verilog-auto-sense-sigs)
@@ -14039,7 +14039,7 @@
 
 	* epa-file.el (epa-file-write-region): Encode the region according
 	to `buffer-file-format'.  Problem reported at:
-	<http://sourceforge.jp/ticket/browse.php?group_id=2267&tid=32917>.
+	<https://sourceforge.jp/ticket/browse.php?group_id=2267&tid=32917>.
 
 2014-01-14  Stefan Monnier  <monnier@iro.umontreal.ca>
 
@@ -15465,7 +15465,7 @@
 2013-12-12  Fabián Ezequiel Gallina  <fgallina@gnu.org>
 
 	* progmodes/python.el (python-indent-context)
-	(python-indent-calculate-indentation): Fix auto-identation
+	(python-indent-calculate-indentation): Fix auto-indentation
 	behavior for comment blocks.  (Bug#15916)
 
 2013-12-12  Nathan Trapuzzano  <nbtrap@nbtrap.com>  (tiny change)
@@ -25522,7 +25522,7 @@
 
 	* textmodes/ispell.el (ispell-add-per-file-word-list):
 	Fix `flyspell-correct-word-before-point' error when accepting
-	words and `coment-padding' is an integer by using
+	words and `comment-padding' is an integer by using
 	`comment-normalize-vars' (Bug #14214).
 
 2013-04-17  Fabián Ezequiel Gallina  <fgallina@gnu.org>

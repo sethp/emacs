@@ -27,8 +27,8 @@
 
 ;;; Commentary:
 
-;; To enter perl-mode automatically, add (autoload 'perl-mode "perl-mode")
-;; to your init file and change the first line of your perl script to:
+;; To enter `perl-mode' automatically, change the first line of your
+;; perl script to:
 ;; #!/usr/bin/perl --	 # -*-Perl-*-
 ;; With arguments to perl:
 ;; #!/usr/bin/perl -P-	 # -*-Perl-*-
@@ -46,10 +46,6 @@
 ;; move past leading white space; delete an empty comment; reindent a
 ;; comment; move to end of line; create an empty comment; tell you that
 ;; the line ends in a quoted string, or has a # which should be a \#.
-
-;; If your machine is slow, you may want to remove some of the bindings
-;; to perl-electric-terminator.  I changed the indenting defaults to be
-;; what Larry Wall uses in perl/lib, but left in all the options.
 
 ;; I also tuned a few things:  comments and labels starting in column
 ;; zero are left there by perl-indent-exp; perl-beginning-of-function
@@ -191,7 +187,9 @@
      ,(concat "\\<"
               (regexp-opt '("if" "until" "while" "elsif" "else" "unless"
                             "do" "dump" "for" "foreach" "exit" "die"
-                            "BEGIN" "END" "return" "exec" "eval") t)
+                            "BEGIN" "END" "return" "exec" "eval"
+                            "when" "given" "default")
+                          t)
               "\\>")
      ;;
      ;; Fontify declarators and prefixes as types.
@@ -212,12 +210,17 @@
 
 (eval-and-compile
   (defconst perl--syntax-exp-intro-keywords
-    '("split" "if" "unless" "until" "while" "print"
-      "grep" "map" "not" "or" "and" "for" "foreach" "return"))
+    '("split" "if" "unless" "until" "while" "print" "printf"
+      "grep" "map" "not" "or" "and" "for" "foreach" "return" "die"
+      "warn" "eval"))
 
   (defconst perl--syntax-exp-intro-regexp
     (concat "\\(?:\\(?:^\\|[^$@&%[:word:]]\\)"
             (regexp-opt perl--syntax-exp-intro-keywords)
+            ;; A HERE document as an argument to printf?
+            ;; when printing to a filehandle.
+            "\\|printf?[ \t]*\\$?[_[:alpha:]][_[:alnum:]]*"
+            "\\|=>"
             "\\|[?:.,;|&*=!~({[]"
             "\\|[^-+][-+]"    ;Bug#42168: `+' is intro but `++' isn't!
             "\\|\\(^\\)\\)[ \t\n]*")))
@@ -240,6 +243,12 @@
                                          (not (nth 3 (syntax-ppss
                                                       (match-beginning 0))))))
                             (string-to-syntax ". p"))))
+      ;; If "\" is acting as a backslash operator, it shouldn't start an
+      ;; escape sequence, so change its syntax.  This allows us to handle
+      ;; correctly the \() construct (Bug#11996) as well as references
+      ;; to string values.
+      ("\\(\\\\\\)['`\"($]" (1 (unless (nth 3 (syntax-ppss))
+                                       (string-to-syntax "."))))
       ;; Handle funny names like $DB'stop.
       ("\\$ ?{?\\^?[_[:alpha:]][_[:alnum:]]*\\('\\)[_[:alpha:]]" (1 "_"))
       ;; format statements
@@ -278,6 +287,7 @@
                                       (backward-sexp 1)
                                       (member (buffer-substring (point) end)
                                               perl--syntax-exp-intro-keywords)))
+                               (bobp)
                                (memq (char-before)
                                      '(?? ?: ?. ?, ?\; ?= ?! ?~ ?\( ?\[))))))
                nil ;; A division sign instead of a regexp-match.
@@ -326,7 +336,7 @@
         "<<\\(~\\)?[ \t]*\\('[^'\n]*'\\|\"[^\"\n]*\"\\|\\\\[[:alpha:]][[:alnum:]]*\\)"
         ;; The <<EOF case which needs perl--syntax-exp-intro-regexp, to
         ;; disambiguate with the left-bitshift operator.
-        "\\|" perl--syntax-exp-intro-regexp "<<\\(?2:\\sw+\\)\\)"
+        "\\|" perl--syntax-exp-intro-regexp "<<\\(?1:~\\)?\\(?2:\\sw+\\)\\)"
         ".*\\(\n\\)")
        (4 (let* ((eol (match-beginning 4))
                  (st (get-text-property eol 'syntax-table))
@@ -455,7 +465,7 @@
 		      (scan-error (goto-char startpos) nil))
 		  (not (or (nth 8 (parse-partial-sexp
 				   ;; Since we don't know if point is within
-				   ;; the first or the scond arg, we have to
+				   ;; the first or the second arg, we have to
 				   ;; start from the beginning.
 				   (if twoargs (1+ (nth 8 state)) (point))
 				   limit nil nil state 'syntax-table))
@@ -501,7 +511,7 @@
 				     (string-to-syntax "|e")
 				   (string-to-syntax "\"e")))
 	      (forward-char 1)
-	      ;; Re-use perl-syntax-propertize-special-constructs to handle the
+	      ;; Reuse perl-syntax-propertize-special-constructs to handle the
 	      ;; second part (the first delimiter of second part can't be
 	      ;; preceded by "s" or "tr" or "y", so it will not be considered
 	      ;; as twoarg).
@@ -1118,7 +1128,6 @@ Returns (parse-state) if line starts inside a string."
         (t (forward-char -1) (forward-comment (- (point))) t)))))
 
 ;; note: this may be slower than the c-mode version, but I can understand it.
-(defalias 'indent-perl-exp 'perl-indent-exp)
 (defun perl-indent-exp ()
   "Indent each line of the Perl grouping following point."
   (interactive)
@@ -1218,7 +1227,6 @@ With argument, repeat that many times; negative args move backward."
 	      (goto-char (point-min)))))
       (setq arg (1+ arg)))))
 
-(defalias 'mark-perl-function 'perl-mark-function)
 (defun perl-mark-function ()
   "Put mark at end of Perl function, point at beginning."
   (interactive)
@@ -1227,6 +1235,9 @@ With argument, repeat that many times; negative args move backward."
   (push-mark)
   (perl-beginning-of-function)
   (backward-paragraph))
+
+(define-obsolete-function-alias 'indent-perl-exp #'perl-indent-exp "29.1")
+(define-obsolete-function-alias 'mark-perl-function #'perl-mark-function "29.1")
 
 (provide 'perl-mode)
 
